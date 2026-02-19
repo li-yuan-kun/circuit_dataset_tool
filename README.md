@@ -70,9 +70,7 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ### 4.2 启动前端（Vite）
 
 ```bash
-cd circuit_dataset_tool/frontend
-npm install
-npm run dev
+cd frontend && npm install && npm run dev
 ```
 
 打开终端输出的地址（通常是 `http://127.0.0.1:5173`）。
