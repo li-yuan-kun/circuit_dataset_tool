@@ -69,6 +69,9 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 4.2 启动前端（Vite）
 
+> ⚠️ **当前前端状态：未完成，缺失入口与构建配置（例如 `package.json`）**。  
+> 也就是说，当前仓库下的前端代码还不能直接通过 `npm run dev` 启动。
+
 ```bash
 cd circuit_dataset_tool/frontend
 npm install
@@ -78,6 +81,38 @@ npm run dev
 打开终端输出的地址（通常是 `http://127.0.0.1:5173`）。
 
 > 如果前端需要配置后端地址，请查看/修改 `frontend/src/api/client.ts` 中的 API base URL（常见为 `VITE_API_BASE_URL` 或硬编码默认值）。
+
+#### 4.2.1 如果你已补齐前端（可直接复制）
+
+当你补齐前端入口与构建配置后，可按下面步骤启动：
+
+```bash
+cd /path/to/circuit_dataset_tool/frontend
+
+# 1) 检查 Node 版本（建议 >= 18）
+node -v
+
+# 2) 安装依赖
+npm install
+
+# 3) 启动开发服务器
+npm run dev
+```
+
+预期目录树（最小可运行）：
+
+```text
+frontend/
+├── package.json
+├── package-lock.json           # 或 pnpm-lock.yaml / yarn.lock
+├── vite.config.ts
+├── index.html                  # 或 src/index.html + 正确入口映射
+└── src/
+    ├── main.ts                 # 入口文件（示例）
+    ├── api/
+    │   └── client.ts
+    └── ...
+```
 
 ---
 
@@ -294,6 +329,16 @@ uvicorn backend.app.main:app --reload
 
 ## 9. 常见问题（FAQ）
 
+### Q0：快速开始阶段常见故障排查（先看这里）
+
+- **路径错误（例如写成 `/home/liyk/...`）**  
+  请先执行 `pwd` 确认当前项目根目录，再使用相对路径进入：
+  `cd /你的实际路径/circuit_dataset_tool`，避免照抄他人机器上的绝对路径。
+- **前端缺少 `package.json`**  
+  如果 `frontend/package.json` 不存在，说明前端构建配置尚未补齐，`npm install` / `npm run dev` 会失败。请先补齐前端脚手架与入口文件。
+- **Node 版本不满足要求**  
+  本项目前端建议 Node.js **18+**。可用 `node -v` 检查；版本过低时请升级（推荐使用 nvm/fnm 管理多版本）。
+
 ### Q1：`VOCAB_MISMATCH` / `footprint template not found`
 - 请确认 `shared/vocab.json` 中的 `type` 与 `shared/footprints/` 下模板命名一致，并且后端配置指向正确路径。
 
@@ -314,5 +359,16 @@ uvicorn backend.app.main:app --reload
 
 - 后端文档入口：`/api/v1/docs`
 - 建议先确保 `shared/` 资源齐备（vocab + footprints），再逐步完善算法模块与前端交互。
+
+---
+
+## 11. 最小验收标准（MVP）
+
+满足以下 4 条，即可认为“端到端最小可用”：
+
+1. 前端页面可打开（开发地址可访问，无白屏、无阻塞性报错）。
+2. 前端 **Health** 按钮/功能可成功请求后端健康检查接口（如 `GET /healthz`）。
+3. 可从前端导出 `scene.json`。
+4. 可从前端导出 `mask.png`（手绘或后端生成后保存均可）。
 
 ---
