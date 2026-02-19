@@ -23,6 +23,8 @@ from typing import Any, Dict, Optional
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 
+from ..deps import get_footprint_db, get_settings
+
 try:
     from pydantic import BaseModel, Field
 except Exception:  # pragma: no cover
@@ -49,38 +51,6 @@ def _raise(code: str, message: str, details: Optional[Dict[str, Any]] = None, st
         status_code=status_code,
         detail={"error": {"code": code, "message": message, "details": details or {}}},
     )
-
-
-def _get_settings(request: Request):
-    s = getattr(request.app.state, "settings", None)
-    if s is not None:
-        return s
-    try:
-        from ...config import get_settings  # type: ignore
-
-        return get_settings()
-    except Exception:
-        return None
-
-
-def _get_footprint_db(request: Request):
-    db = getattr(request.app.state, "footprint_db", None)
-    if db is not None:
-        return db
-
-    settings = _get_settings(request)
-    try:
-        from ...core_logic.rasterize import load_vocab, load_footprints  # type: ignore
-
-        if settings is None:
-            return None
-        vocab = getattr(request.app.state, "vocab", None) or load_vocab(settings.VOCAB_PATH)
-        db = load_footprints(settings.FOOTPRINT_DIR, vocab)
-        request.app.state.vocab = vocab
-        request.app.state.footprint_db = db
-        return db
-    except Exception:
-        return None
 
 
 def _decode_png_base64_to_mask(mask_png_base64: str) -> np.ndarray:
@@ -115,7 +85,10 @@ def label_compute(req: ComputeLabelRequest, request: Request) -> Dict[str, Any]:
     mask = _decode_png_base64_to_mask(req.mask_png_base64)
 
     # Occ threshold
-    settings = _get_settings(request)
+    try:
+        settings = get_settings(request)
+    except HTTPException:
+        settings = None
     occ_threshold = req.occ_threshold
     if occ_threshold is None:
         occ_threshold = getattr(settings, "DEFAULT_OCC_THRESHOLD", 0.9)
@@ -148,11 +121,13 @@ def label_compute(req: ComputeLabelRequest, request: Request) -> Dict[str, Any]:
         # If scene doesn't provide resolution, skip strict check.
         pass
 
-    footprint_db = _get_footprint_db(request)
-    if footprint_db is None:
+    try:
+        footprint_db = get_footprint_db(request)
+    except HTTPException as exc:
         _raise(
             "OCCLUSION_FAILED",
             "footprint_db is not available (resources not loaded)",
+            details={"dependency_error": exc.detail},
             status_code=500,
         )
 

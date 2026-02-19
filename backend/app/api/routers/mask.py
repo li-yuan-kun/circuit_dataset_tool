@@ -25,6 +25,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
+from ..deps import get_settings
+
 try:
     from pydantic import BaseModel, Field
 except Exception:  # pragma: no cover
@@ -55,18 +57,6 @@ def _raise(code: str, message: str, details: Optional[Dict[str, Any]] = None, st
     )
 
 
-def _get_settings(request: Request):
-    s = getattr(request.app.state, "settings", None)
-    if s is not None:
-        return s
-    try:
-        from ...config import get_settings  # type: ignore
-
-        return get_settings()
-    except Exception:
-        return None
-
-
 def _scene_resolution(scene: Dict[str, Any], settings) -> Dict[str, int]:
     meta = scene.get("meta") or {}
     res = meta.get("resolution") or {}
@@ -88,7 +78,10 @@ def mask_generate(req: GenerateMaskRequest, request: Request):
     if not strategy:
         _raise("REQUEST_VALIDATION_ERROR", "Missing mask strategy", status_code=422)
 
-    settings = _get_settings(request)
+    try:
+        settings = get_settings(request)
+    except HTTPException:
+        settings = None
     resolution = _scene_resolution(scene, settings)
     seed = int((scene.get("meta") or {}).get("seed") or 0)
 

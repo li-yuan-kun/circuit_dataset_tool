@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..deps import get_settings, get_vocab
+
 try:
     from pydantic import BaseModel
 except Exception:  # pragma: no cover
@@ -59,42 +61,18 @@ def _http_error(code: str, message: str, *, details: Optional[Dict[str, Any]] = 
     )
 
 
-def _get_settings(request: Request):
-    s = getattr(request.app.state, "settings", None)
-    if s is not None:
-        return s
-    try:
-        from ...config import get_settings  # type: ignore
-
-        return get_settings()
-    except Exception:
-        return None
-
-
-def _get_vocab(request: Request) -> Optional[Dict[str, Any]]:
-    v = getattr(request.app.state, "vocab", None)
-    if isinstance(v, dict):
-        return v
-
-    settings = _get_settings(request)
-    if settings is None:
-        return None
-
-    try:
-        from ...core_logic.rasterize import load_vocab  # type: ignore
-
-        vocab = load_vocab(settings.VOCAB_PATH)
-        request.app.state.vocab = vocab
-        return vocab
-    except Exception:
-        return None
-
-
 def _try_schema_validate(scene: Dict[str, Any], request: Request, warnings: List[str]) -> None:
     """Try validating scene.json with JSON Schema if possible."""
 
-    settings = _get_settings(request)
-    vocab = _get_vocab(request)
+    try:
+        settings = get_settings(request)
+    except HTTPException:
+        settings = None
+
+    try:
+        vocab = get_vocab(request)
+    except HTTPException:
+        vocab = None
     schema_path: Optional[Path] = None
 
     # Derive schema path from vocab location if possible.
@@ -264,7 +242,10 @@ def scene_validate(req: ValidateSceneRequest, request: Request) -> Dict[str, Any
     # Optional JSON Schema validation
     _try_schema_validate(scene, request, warnings)
 
-    vocab = _get_vocab(request)
+    try:
+        vocab = get_vocab(request)
+    except HTTPException:
+        vocab = None
     w2, errs = _validate_scene_basic(scene, vocab, strict)
     warnings.extend(w2)
     if errs:
@@ -276,7 +257,10 @@ def scene_validate(req: ValidateSceneRequest, request: Request) -> Dict[str, Any
             code = "PIN_NOT_FOUND"
         raise _http_error(code, "scene validation failed", details={"errors": errs}, status_code=400)
 
-    settings = _get_settings(request)
+    try:
+        settings = get_settings(request)
+    except HTTPException:
+        settings = None
     scene_norm = _normalize_scene(scene, settings)
 
     return {"ok": True, "scene_norm": scene_norm, "warnings": warnings}

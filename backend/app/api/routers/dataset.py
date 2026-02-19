@@ -25,6 +25,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
+from ..deps import get_settings
+
 
 router = APIRouter(tags=["dataset"])
 
@@ -55,18 +57,6 @@ def _error(code: str, message: str, details: Optional[Dict[str, Any]] = None, st
         status_code=status_code,
         detail={"error": {"code": code, "message": message, "details": details or {}}},
     )
-
-
-def _get_settings(request: Request):
-    settings = getattr(request.app.state, "settings", None)
-    if settings is None:
-        try:
-            from ...config import get_settings  # type: ignore
-
-            settings = get_settings()
-        except Exception:
-            settings = None
-    return settings
 
 
 def _strip_b64_prefix(s: str) -> str:
@@ -112,9 +102,10 @@ def _save_via_services(
 ) -> Dict[str, Any]:
     """Save a sample using the v0.3 service layer (preferred)."""
 
-    settings = _get_settings(request)
-    if settings is None:
-        raise _error("SAVE_FAILED", "Settings not available", {}, status_code=500)
+    try:
+        settings = get_settings(request)
+    except HTTPException as exc:
+        raise _error("SAVE_FAILED", "Settings not available", {"dependency_error": exc.detail}, status_code=500)
 
     try:
         from ...services.storage import LocalStorage  # type: ignore

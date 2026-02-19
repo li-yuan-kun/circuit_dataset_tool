@@ -19,6 +19,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..deps import get_vocab
+
 router = APIRouter(tags=["topology"])
 
 
@@ -43,46 +45,21 @@ def _error(code: str, message: str, details: Optional[Dict[str, Any]] = None, st
     )
 
 
-def _get_settings(request: Request):
-    s = getattr(request.app.state, "settings", None)
-    if s is None:
-        try:
-            from ...config import get_settings  # type: ignore
-
-            s = get_settings()
-        except Exception:
-            s = None
-    return s
-
-
-def _get_vocab(request: Request):
-    vocab = getattr(request.app.state, "vocab", None)
-    if vocab is not None:
-        return vocab
-
-    settings = _get_settings(request)
-    if settings is None:
-        return None
-
-    try:
-        from ...core_logic.rasterize import load_vocab  # type: ignore
-
-        vocab = load_vocab(settings.VOCAB_PATH)
-        request.app.state.vocab = vocab
-        return vocab
-    except Exception:
-        return None
-
-
 @router.post("/topology/shuffle")
 def topology_shuffle(req: ShuffleSceneRequest, request: Request) -> Dict[str, Any]:
     scene: Dict[str, Any] = req.scene
     params: Dict[str, Any] = getattr(req, "params", {}) or {}
     return_paths: bool = bool(getattr(req, "return_paths", True))
 
-    vocab = _get_vocab(request)
-    if vocab is None:
-        raise _error("VOCAB_MISMATCH", "Vocab is not loaded; cannot shuffle scene", status_code=500)
+    try:
+        vocab = get_vocab(request)
+    except HTTPException as exc:
+        raise _error(
+            "VOCAB_MISMATCH",
+            "Vocab is not loaded; cannot shuffle scene",
+            details={"dependency_error": exc.detail},
+            status_code=500,
+        )
 
     # Seed: prefer scene.meta.seed, fallback to 0.
     seed = 0
