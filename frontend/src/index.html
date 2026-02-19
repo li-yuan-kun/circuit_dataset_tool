@@ -6,9 +6,6 @@
     <meta name="color-scheme" content="light dark" />
     <title>Circuit Dataset Tool</title>
 
-    <!-- Vite: index.html 位于 src/ 下时，资源用相对路径最稳妥 -->
-    <link rel="stylesheet" href="./styles/style.css" />
-
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%2300a2ff' d='M10 34h10v-4H10v4Zm34 0h10v-4H44v4ZM24 52h4V12h-4v40Zm12 0h4V12h-4v40Z'/%3E%3C/svg%3E" />
   </head>
 
@@ -322,37 +319,7 @@
     <input id="file-mask" type="file" accept="image/png,image/*" hidden />
 
     <!-- Bootstrapping (Vite + TS) -->
-    <script type="module">
-      // 轻量初始化：恢复 Base URL 与 range 显示
-      const baseUrlEl = document.getElementById("api-base-url");
-      try {
-        const saved = localStorage.getItem("cdt.apiBaseUrl");
-        if (saved && baseUrlEl) baseUrlEl.value = saved;
-      } catch {}
+    <script type="module" src="./main.ts"></script>
 
-      function bindRangeText(rangeId, textId, fmt) {
-        const r = document.getElementById(rangeId);
-        const t = document.getElementById(textId);
-        if (!r || !t) return;
-        const update = () => {
-          const v = Number(r.value);
-          t.textContent = fmt ? fmt(v) : String(v);
-        };
-        r.addEventListener("input", update);
-        update();
-      }
-
-      bindRangeText("mask-brush-size", "mask-brush-size-text");
-      bindRangeText("mask-brush-hardness", "mask-brush-hardness-text", (v) => v.toFixed(2));
-
-      // 交给 app.ts 接管所有逻辑
-      import { bootstrapApp } from "./app";
-
-      bootstrapApp().catch((err) => {
-        console.error(err);
-        const el = document.getElementById("status-log");
-        if (el) el.textContent = String(err?.stack || err);
-      });
-    </script>
   </body>
 </html>
