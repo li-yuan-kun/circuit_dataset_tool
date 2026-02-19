@@ -346,7 +346,7 @@
       bindRangeText("mask-brush-hardness", "mask-brush-hardness-text", (v) => v.toFixed(2));
 
       // 交给 app.ts 接管所有逻辑
-      import { bootstrapApp } from "./app";
+      import { bootstrapApp } from "./app.ts";
 
       bootstrapApp().catch((err) => {
         console.error(err);

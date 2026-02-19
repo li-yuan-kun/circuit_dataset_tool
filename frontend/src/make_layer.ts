@@ -207,4 +207,14 @@ export class MaskLayer {
     });
     return blob;
   }
+
+  async importMaskBlob(blob: Blob): Promise<void> {
+    const bmp = await createImageBitmap(blob);
+    this.ctx.save();
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.clearRect(0, 0, this.resolution.w, this.resolution.h);
+    this.ctx.drawImage(bmp, 0, 0, this.resolution.w, this.resolution.h);
+    this.ctx.restore();
+    bmp.close();
+  }
 }
