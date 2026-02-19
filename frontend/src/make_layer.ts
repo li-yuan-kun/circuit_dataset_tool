@@ -1,4 +1,4 @@
-import type { Point, Resolution } from "./models/types";
+import type { Point, Resolution } from "./modules/types";
 
 export type MaskLayerOptions = { resolution: Resolution };
 

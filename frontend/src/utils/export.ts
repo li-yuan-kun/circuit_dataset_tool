@@ -1,4 +1,4 @@
-import type { Scene, Label } from "../models/types";
+import type { Scene, Label } from "../modules/types";
 
 export async function exportCanvasPNG(canvas: HTMLCanvasElement): Promise<Blob> {
   const blob = await new Promise<Blob>((resolve, reject) => {
