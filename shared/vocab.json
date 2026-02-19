@@ -1,0 +1,258 @@
+{
+  "description": "Shared component vocabulary for Circuit Dataset Tool (v0.3+).",
+  "types": {
+    "AND": {
+      "asset": {
+        "path": "components_svg/AND.svg",
+        "type": "svg"
+      },
+      "category": "logic",
+      "display_name": "AND Gate",
+      "footprint": {
+        "path": "AND.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -60,
+          "y": -20
+        },
+        "p1": {
+          "x": -60,
+          "y": 20
+        },
+        "p2": {
+          "x": 60,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 80,
+        "w": 120
+      }
+    },
+    "C": {
+      "asset": {
+        "path": "components_svg/C.svg",
+        "type": "svg"
+      },
+      "category": "passive",
+      "display_name": "Capacitor",
+      "footprint": {
+        "path": "C.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -45,
+          "y": 0
+        },
+        "p1": {
+          "x": 45,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 50,
+        "w": 90
+      }
+    },
+    "Comparator": {
+      "asset": {
+        "path": "components_svg/Comparator.svg",
+        "type": "svg"
+      },
+      "category": "analog",
+      "display_name": "Comparator",
+      "footprint": {
+        "path": "Comparator.png"
+      },
+      "pins": {
+        "p0": {
+          "role": "in_plus",
+          "x": -70,
+          "y": -22
+        },
+        "p1": {
+          "role": "in_minus",
+          "x": -70,
+          "y": 22
+        },
+        "p2": {
+          "role": "out",
+          "x": 70,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 90,
+        "w": 140
+      }
+    },
+    "NAND": {
+      "asset": {
+        "path": "components_svg/NAND.svg",
+        "type": "svg"
+      },
+      "category": "logic",
+      "display_name": "NAND Gate",
+      "footprint": {
+        "path": "NAND.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -60,
+          "y": -20
+        },
+        "p1": {
+          "x": -60,
+          "y": 20
+        },
+        "p2": {
+          "x": 60,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 80,
+        "w": 120
+      }
+    },
+    "NOR": {
+      "asset": {
+        "path": "components_svg/NOR.svg",
+        "type": "svg"
+      },
+      "category": "logic",
+      "display_name": "NOR Gate",
+      "footprint": {
+        "path": "NOR.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -60,
+          "y": -20
+        },
+        "p1": {
+          "x": -60,
+          "y": 20
+        },
+        "p2": {
+          "x": 60,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 80,
+        "w": 120
+      }
+    },
+    "NOT": {
+      "asset": {
+        "path": "components_svg/NOT.svg",
+        "type": "svg"
+      },
+      "category": "logic",
+      "display_name": "NOT Gate",
+      "footprint": {
+        "path": "NOT.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -55,
+          "y": 0
+        },
+        "p1": {
+          "x": 55,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 70,
+        "w": 110
+      }
+    },
+    "OR": {
+      "asset": {
+        "path": "components_svg/OR.svg",
+        "type": "svg"
+      },
+      "category": "logic",
+      "display_name": "OR Gate",
+      "footprint": {
+        "path": "OR.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -60,
+          "y": -20
+        },
+        "p1": {
+          "x": -60,
+          "y": 20
+        },
+        "p2": {
+          "x": 60,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 80,
+        "w": 120
+      }
+    },
+    "R": {
+      "asset": {
+        "path": "components_svg/R.svg",
+        "type": "svg"
+      },
+      "category": "passive",
+      "display_name": "Resistor",
+      "footprint": {
+        "path": "R.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -50,
+          "y": 0
+        },
+        "p1": {
+          "x": 50,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 40,
+        "w": 100
+      }
+    },
+    "XOR": {
+      "asset": {
+        "path": "components_svg/XOR.svg",
+        "type": "svg"
+      },
+      "category": "logic",
+      "display_name": "XOR Gate",
+      "footprint": {
+        "path": "XOR.png"
+      },
+      "pins": {
+        "p0": {
+          "x": -65,
+          "y": -20
+        },
+        "p1": {
+          "x": -65,
+          "y": 20
+        },
+        "p2": {
+          "x": 65,
+          "y": 0
+        }
+      },
+      "size": {
+        "h": 80,
+        "w": 130
+      }
+    }
+  },
+  "vocab_version": "2026.02"
+}

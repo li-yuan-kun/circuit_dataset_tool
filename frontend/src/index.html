@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Circuit Dataset Tool</title>
+
+    <!-- Vite: index.html 位于 src/ 下时，资源用相对路径最稳妥 -->
+    <link rel="stylesheet" href="./styles/style.css" />
+
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%2300a2ff' d='M10 34h10v-4H10v4Zm34 0h10v-4H44v4ZM24 52h4V12h-4v40Zm12 0h4V12h-4v40Z'/%3E%3C/svg%3E" />
+  </head>
+
+  <body>
+    <noscript>
+      <div class="noscript">
+        该工具需要启用 JavaScript 才能运行。
+      </div>
+    </noscript>
+
+    <header class="topbar" role="banner">
+      <div class="brand">
+        <div class="brand__title">Circuit Dataset Tool</div>
+        <div class="brand__subtitle">电路图交互编辑 · Mask 生成/编辑 · Label/Shuffle · 数据集导出</div>
+      </div>
+
+      <div class="topbar__actions" role="toolbar" aria-label="Main toolbar">
+        <button id="btn-new" type="button" class="btn">新建</button>
+        <button id="btn-load-scene" type="button" class="btn">导入 scene.json</button>
+        <button id="btn-save-scene" type="button" class="btn">导出 scene.json</button>
+        <span class="sep" aria-hidden="true"></span>
+
+        <button id="btn-mode-circuit" type="button" class="btn btn--toggle is-active" aria-pressed="true">电路编辑</button>
+        <button id="btn-mode-mask" type="button" class="btn btn--toggle" aria-pressed="false">Mask 编辑</button>
+        <span class="sep" aria-hidden="true"></span>
+
+        <button id="btn-export-image" type="button" class="btn">导出 image.png</button>
+        <button id="btn-export-mask" type="button" class="btn">导出 mask.png</button>
+        <button id="btn-export-local" type="button" class="btn btn--primary">导出本地样本包</button>
+      </div>
+
+      <div class="topbar__right" role="toolbar" aria-label="Backend settings">
+        <label class="field field--inline" title="例如：http://localhost:8000/api/v1">
+          <span class="field__label">后端 Base URL</span>
+          <input
+            id="api-base-url"
+            class="input input--mono"
+            type="text"
+            inputmode="url"
+            spellcheck="false"
+            placeholder="http://localhost:8000/api/v1"
+            value="http://localhost:8000/api/v1"
+          />
+        </label>
+        <button id="btn-health" type="button" class="btn">Health</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Left: component palette + mask tools -->
+      <aside class="sidebar sidebar--left" aria-label="Tools">
+        <section class="panel">
+          <div class="panel__header">
+            <h2 class="panel__title">器件库</h2>
+            <div class="panel__hint">从 vocab.json 加载；点击/拖拽放置</div>
+          </div>
+
+          <div class="row">
+            <input
+              id="palette-search"
+              class="input"
+              type="search"
+              placeholder="搜索器件类型 (R/C/AND/OR/...)"
+              autocomplete="off"
+            />
+          </div>
+
+          <div id="palette-list" class="palette" aria-label="Component palette">
+            <div class="muted">正在加载器件库…</div>
+          </div>
+
+          <details class="details">
+            <summary>快捷提示</summary>
+            <ul class="hintlist">
+              <li>选择器件：点击器件</li>
+              <li>移动器件：拖拽器件</li>
+              <li>连线：点击引脚并拖拽到另一个引脚（或按住 Shift）</li>
+              <li>删除：选中后按 Delete / Backspace</li>
+            </ul>
+          </details>
+        </section>
+
+        <section class="panel" aria-label="Mask tools">
+          <div class="panel__header">
+            <h2 class="panel__title">Mask 工具</h2>
+            <div class="panel__hint">二值遮挡 (0/255)，与导出分辨率对齐</div>
+          </div>
+
+          <div class="row row--wrap">
+            <button id="mask-mode-paint" type="button" class="btn btn--toggle is-active" aria-pressed="true">涂抹</button>
+            <button id="mask-mode-erase" type="button" class="btn btn--toggle" aria-pressed="false">擦除</button>
+            <button id="btn-clear-mask" type="button" class="btn btn--danger">清空</button>
+          </div>
+
+          <div class="row">
+            <label class="field">
+              <span class="field__label">画笔宽度</span>
+              <div class="field__control field__control--range">
+                <input id="mask-brush-size" type="range" min="1" max="120" step="1" value="24" />
+                <span id="mask-brush-size-text" class="mono">24</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="row">
+            <label class="field">
+              <span class="field__label">硬度</span>
+              <div class="field__control field__control--range">
+                <input id="mask-brush-hardness" type="range" min="0" max="1" step="0.05" value="0.8" />
+                <span id="mask-brush-hardness-text" class="mono">0.80</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="row row--wrap">
+            <button id="btn-load-mask" type="button" class="btn">导入 mask.png</button>
+            <button id="btn-generate-mask" type="button" class="btn">自动生成</button>
+          </div>
+
+          <details class="details" open>
+            <summary>自动生成参数</summary>
+            <div class="grid2">
+              <label class="field">
+                <span class="field__label">策略</span>
+                <select id="mask-strategy" class="select">
+                  <option value="perlin">perlin</option>
+                  <option value="blobs">blobs</option>
+                  <option value="strokes">strokes</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="field__label">目标遮挡率</span>
+                <input id="mask-ratio" class="input" type="number" min="0" max="1" step="0.01" value="0.35" />
+              </label>
+
+              <label class="field">
+                <span class="field__label">斑块尺度</span>
+                <input id="mask-scale" class="input" type="number" min="1" max="256" step="1" value="64" />
+              </label>
+
+              <label class="field">
+                <span class="field__label">随机种子</span>
+                <input id="mask-seed" class="input" type="number" step="1" placeholder="(可选)" />
+              </label>
+            </div>
+
+            <div class="muted small">
+              说明：具体策略参数由前端传入后端 /mask/generate；实现可按需扩展。
+            </div>
+          </details>
+        </section>
+      </aside>
+
+      <!-- Center: canvas workspace -->
+      <main class="workspace" aria-label="Canvas workspace">
+        <div class="workspace__header">
+          <div class="workspace__meta">
+            <span class="badge" id="badge-resolution">1024×1024</span>
+            <span class="badge" id="badge-mode">MODE: CIRCUIT</span>
+            <span class="badge" id="badge-selection">SELECTION: -</span>
+          </div>
+
+          <div class="workspace__quick" role="toolbar" aria-label="Quick actions">
+            <button id="btn-zoom-fit" type="button" class="btn">适配</button>
+            <button id="btn-zoom-100" type="button" class="btn">100%</button>
+            <button id="btn-zoom-in" type="button" class="btn">＋</button>
+            <button id="btn-zoom-out" type="button" class="btn">－</button>
+          </div>
+        </div>
+
+        <div id="canvas-container" class="canvas-container" aria-label="Editor canvas">
+          <!--
+            采用多层 canvas：
+            - circuit-canvas: 电路渲染
+            - mask-canvas:   mask 绘制层（半透明 overlay）
+            - ui-canvas:     选择框/命中测试/交互提示
+          -->
+          <canvas id="circuit-canvas" width="1024" height="1024"></canvas>
+          <canvas id="mask-canvas" width="1024" height="1024"></canvas>
+          <canvas id="ui-canvas" width="1024" height="1024"></canvas>
+        </div>
+
+        <div class="workspace__footer">
+          <div class="muted small" id="status-short">就绪</div>
+        </div>
+      </main>
+
+      <!-- Right: function label + compute/save + previews -->
+      <aside class="sidebar sidebar--right" aria-label="Operations">
+        <section class="panel" aria-label="Label operations">
+          <div class="panel__header">
+            <h2 class="panel__title">标注与导出</h2>
+            <div class="panel__hint">调用后端：Scene 校验 / Label 计算 / Shuffle / 保存样本</div>
+          </div>
+
+          <div class="grid2">
+            <label class="field">
+              <span class="field__label">Function</span>
+              <select id="function-select" class="select">
+                <option value="ADC">ADC</option>
+                <option value="DAC">DAC</option>
+                <option value="UNKNOWN" selected>UNKNOWN</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span class="field__label">自定义</span>
+              <input id="function-custom" class="input" type="text" placeholder="(可选)" />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Occlusion 阈值</span>
+              <input id="occ-threshold" class="input" type="number" min="0" max="1" step="0.01" value="0.90" />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Shuffle Seed</span>
+              <input id="shuffle-seed" class="input" type="number" step="1" placeholder="(可选)" />
+            </label>
+          </div>
+
+          <div class="row row--wrap">
+            <button id="btn-apply-function" type="button" class="btn">应用 Function</button>
+            <button id="btn-validate-scene" type="button" class="btn">校验 Scene</button>
+            <button id="btn-compute-label" type="button" class="btn btn--primary">计算 Label</button>
+            <button id="btn-shuffle" type="button" class="btn">Shuffle</button>
+          </div>
+
+          <div class="row">
+            <button id="btn-save-backend" type="button" class="btn btn--primary btn--block">保存到后端数据集</button>
+          </div>
+
+          <details class="details">
+            <summary>Shuffle 参数</summary>
+            <div class="grid2">
+              <label class="field">
+                <span class="field__label">placement</span>
+                <select id="shuffle-placement" class="select">
+                  <option value="random_nonoverlap" selected>random_nonoverlap</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="field__label">route_mode</span>
+                <select id="shuffle-route" class="select">
+                  <option value="two_seg" selected>two_seg</option>
+                  <option value="straight">straight</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="field__label">bend_mode</span>
+                <select id="shuffle-bend" class="select">
+                  <option value="auto" selected>auto</option>
+                  <option value="hv">hv</option>
+                  <option value="vh">vh</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="field__label">margin</span>
+                <input id="shuffle-margin" class="input" type="number" min="0" max="200" step="1" value="20" />
+              </label>
+
+              <label class="field">
+                <span class="field__label">max_tries</span>
+                <input id="shuffle-max-tries" class="input" type="number" min="10" max="20000" step="10" value="2000" />
+              </label>
+
+              <label class="field">
+                <span class="field__label">return_paths</span>
+                <select id="shuffle-return-paths" class="select">
+                  <option value="true" selected>true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel" aria-label="Preview">
+          <div class="panel__header">
+            <h2 class="panel__title">Label 预览</h2>
+            <div class="panel__hint">counts_all / counts_visible / occlusion 明细</div>
+          </div>
+
+          <div id="label-summary" class="kv" aria-live="polite">
+            <div class="muted">尚未生成 label。</div>
+          </div>
+
+          <label class="field">
+            <span class="field__label">label.json</span>
+            <textarea id="label-json" class="textarea mono" rows="14" readonly placeholder="(计算后自动填充)"></textarea>
+          </label>
+        </section>
+
+        <section class="panel" aria-label="Log">
+          <div class="panel__header">
+            <h2 class="panel__title">日志</h2>
+            <div class="panel__hint">用于调试与排查（前端 + 后端返回）</div>
+          </div>
+
+          <pre id="status-log" class="log" aria-live="polite"></pre>
+        </section>
+      </aside>
+    </div>
+
+    <!-- Hidden file pickers -->
+    <input id="file-scene" type="file" accept="application/json,.json" hidden />
+    <input id="file-mask" type="file" accept="image/png,image/*" hidden />
+
+    <!-- Bootstrapping (Vite + TS) -->
+    <script type="module">
+      // 轻量初始化：恢复 Base URL 与 range 显示
+      const baseUrlEl = document.getElementById("api-base-url");
+      try {
+        const saved = localStorage.getItem("cdt.apiBaseUrl");
+        if (saved && baseUrlEl) baseUrlEl.value = saved;
+      } catch {}
+
+      function bindRangeText(rangeId, textId, fmt) {
+        const r = document.getElementById(rangeId);
+        const t = document.getElementById(textId);
+        if (!r || !t) return;
+        const update = () => {
+          const v = Number(r.value);
+          t.textContent = fmt ? fmt(v) : String(v);
+        };
+        r.addEventListener("input", update);
+        update();
+      }
+
+      bindRangeText("mask-brush-size", "mask-brush-size-text");
+      bindRangeText("mask-brush-hardness", "mask-brush-hardness-text", (v) => v.toFixed(2));
+
+      // 交给 app.ts 接管所有逻辑
+      import { bootstrapApp } from "./app";
+
+      bootstrapApp().catch((err) => {
+        console.error(err);
+        const el = document.getElementById("status-log");
+        if (el) el.textContent = String(err?.stack || err);
+      });
+    </script>
+  </body>
+</html>

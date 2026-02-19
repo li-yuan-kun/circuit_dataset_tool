@@ -1,0 +1,220 @@
+{
+  "$id": "https://example.com/circuit-dataset-tool/scene.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true,
+  "definitions": {
+    "Endpoint": {
+      "additionalProperties": true,
+      "properties": {
+        "node": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "pin": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "pin"
+      ],
+      "type": "object"
+    },
+    "Point": {
+      "additionalProperties": true,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "mask": {
+      "additionalProperties": true,
+      "properties": {
+        "hash": {
+          "description": "e.g., sha256:...",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "external",
+            "generated"
+          ],
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strategy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "meta": {
+      "additionalProperties": true,
+      "properties": {
+        "params": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "resolution": {
+          "additionalProperties": true,
+          "properties": {
+            "h": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "w": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "w",
+            "h"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "scene_version": {
+          "default": "0.3",
+          "type": "string"
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "timestamp": {
+          "description": "ISO-8601 string",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_version": {
+          "default": "0.3",
+          "type": "string"
+        },
+        "vocab_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "nets": {
+      "default": [],
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "from": {
+            "$ref": "#/definitions/Endpoint"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "default": [],
+            "items": {
+              "$ref": "#/definitions/Point"
+            },
+            "type": "array"
+          },
+          "to": {
+            "$ref": "#/definitions/Endpoint"
+          }
+        },
+        "required": [
+          "id",
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "nodes": {
+      "default": [],
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "pos": {
+            "$ref": "#/definitions/Point"
+          },
+          "rot": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "scale": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "type": "number"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "pos"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "nodes",
+    "nets"
+  ],
+  "title": "Circuit Scene",
+  "type": "object"
+}

@@ -1,0 +1,80 @@
+{
+  "$id": "https://example.com/circuit-dataset-tool/label.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true,
+  "definitions": {
+    "Counts": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "default": {},
+      "type": "object"
+    }
+  },
+  "properties": {
+    "counts_all": {
+      "$ref": "#/definitions/Counts"
+    },
+    "counts_visible": {
+      "$ref": "#/definitions/Counts"
+    },
+    "function": {
+      "default": "UNKNOWN",
+      "minLength": 1,
+      "type": "string"
+    },
+    "label_version": {
+      "default": "0.3",
+      "type": "string"
+    },
+    "meta": {
+      "additionalProperties": true,
+      "default": {},
+      "type": "object"
+    },
+    "occ_threshold": {
+      "default": 0.9,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "occlusion": {
+      "default": [],
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "node_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "occ_ratio": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "type",
+          "occ_ratio"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "counts_all",
+    "counts_visible",
+    "occlusion",
+    "occ_threshold",
+    "function"
+  ],
+  "title": "Circuit Label",
+  "type": "object"
+}
