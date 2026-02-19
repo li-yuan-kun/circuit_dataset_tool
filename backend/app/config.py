@@ -55,6 +55,15 @@ def _default_footprint_dir() -> Path:
     return _repo_root_from_here() / "shared" / "footprints"
 
 
+def _default_cors_allow_origins() -> list[str]:
+    """Default CORS origins for local frontend development."""
+
+    return [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
+
+
 class Settings(BaseSettings):
     """Application settings.
 
@@ -89,6 +98,10 @@ class Settings(BaseSettings):
     # Optional features
     ENABLE_JOBS: bool = False
 
+    # CORS
+    CORS_ALLOW_ORIGINS: list[str] = _default_cors_allow_origins()
+    CORS_ALLOW_CREDENTIALS: bool = False
+
     # -----------------
     # Validators
     # -----------------
@@ -121,6 +134,19 @@ class Settings(BaseSettings):
             raise ValueError("Resolution must be a positive integer")
         return v_int
 
+    @field_validator("CORS_ALLOW_ORIGINS", mode="before")
+    @classmethod
+    def _coerce_cors_allow_origins(cls, v):
+        if v is None:
+            return _default_cors_allow_origins()
+        if isinstance(v, str):
+            # Support comma-separated env format:
+            # CDT_CORS_ALLOW_ORIGINS=http://127.0.0.1:5173,https://example.com
+            return [item.strip() for item in v.split(",") if item.strip()]
+        if isinstance(v, (list, tuple, set)):
+            return [str(item).strip() for item in v if str(item).strip()]
+        raise ValueError("CORS_ALLOW_ORIGINS must be a list or comma-separated string")
+
     @field_validator("DATASET_ROOT", "VOCAB_PATH", "FOOTPRINT_DIR", "MANIFEST_PATH", mode="before")
     @classmethod
     def _coerce_path(cls, v):
@@ -137,6 +163,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _finalize(self) -> "Settings":
+        if not self.CORS_ALLOW_ORIGINS:
+            self.CORS_ALLOW_ORIGINS = _default_cors_allow_origins()
+
         # Derive MANIFEST_PATH from DATASET_ROOT if not provided.
         if self.MANIFEST_PATH is None:
             self.MANIFEST_PATH = (self.DATASET_ROOT / "manifest.jsonl").resolve()

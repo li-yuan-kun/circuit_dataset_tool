@@ -118,11 +118,36 @@ def register_exception_handlers(app: FastAPI) -> None:
 def register_middlewares(app: FastAPI) -> None:
     """Register CORS / request_id / timing middleware."""
 
-    # CORS: for local dev / simple deployment. You can tighten via env in config.py.
+    logger = _get_logger()
+
+    cors_allow_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
+    cors_allow_credentials = False
+
+    try:
+        from .config import get_settings  # type: ignore
+
+        settings = get_settings()
+        cors_allow_origins = list(getattr(settings, "CORS_ALLOW_ORIGINS", cors_allow_origins) or cors_allow_origins)
+        cors_allow_credentials = bool(getattr(settings, "CORS_ALLOW_CREDENTIALS", False))
+    except Exception:
+        logger.warning("settings_load_failed_for_cors")
+
+    if cors_allow_credentials and "*" in cors_allow_origins:
+        explicit_origins = [origin for origin in cors_allow_origins if origin != "*"]
+        if explicit_origins:
+            cors_allow_origins = explicit_origins
+        else:
+            cors_allow_origins = ["http://127.0.0.1:5173", "http://localhost:5173"]
+        logger.warning(
+            "cors_wildcard_not_allowed_with_credentials",
+            extra={"origins": cors_allow_origins},
+        )
+
+    # CORS: local-dev friendly defaults, configurable with CDT_CORS_ALLOW_*.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_allow_origins,
+        allow_credentials=cors_allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -136,8 +161,6 @@ def register_middlewares(app: FastAPI) -> None:
         return
     except Exception:
         pass
-
-    logger = _get_logger()
 
     @app.middleware("http")
     async def _request_id_and_timing(request: Request, call_next):

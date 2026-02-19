@@ -277,12 +277,16 @@ backend/dataset_output/
 - `CDT_DEFAULT_OCC_THRESHOLD`：默认遮挡阈值（默认 0.9）
 - `CDT_DEFAULT_RESOLUTION_W/H`：默认分辨率（默认 1024x1024）
 - `CDT_ENABLE_JOBS`：是否启用批处理 jobs（可选）
+- `CDT_CORS_ALLOW_ORIGINS`：CORS 白名单来源（默认 `http://127.0.0.1:5173,http://localhost:5173`）
+- `CDT_CORS_ALLOW_CREDENTIALS`：是否允许携带凭证（默认 `false`）
 
 示例（Linux/macOS）：
 
 ```bash
 export CDT_DATASET_ROOT=./backend/dataset_output
 export CDT_DEFAULT_OCC_THRESHOLD=0.85
+export CDT_CORS_ALLOW_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+export CDT_CORS_ALLOW_CREDENTIALS=false
 uvicorn backend.app.main:app --reload
 ```
 
@@ -300,7 +304,9 @@ uvicorn backend.app.main:app --reload
 - 默认写入 `<DATASET_ROOT>/manifest.jsonl`。若你改了 `CDT_DATASET_ROOT` 或 `CDT_MANIFEST_PATH`，请检查实际路径与权限。
 
 ### Q4：前端能打开，但调用 API 跨域失败
-- 后端默认开启宽松 CORS（本地开发可用）。若你部署到生产环境，请在后端收紧 `allow_origins`。
+- 请确认请求来源在 `CDT_CORS_ALLOW_ORIGINS` 白名单内（多个值可用英文逗号分隔）。
+- 若你设置了 `CDT_CORS_ALLOW_CREDENTIALS=true`，则不能把来源配置为 `*`；必须使用显式来源（例如 `http://127.0.0.1:5173`）。
+- 浏览器常见报错：`Credential is not supported if the CORS header 'Access-Control-Allow-Origin' is '*'`，说明凭证模式与通配符来源冲突。
 
 ---
 
