@@ -1,4 +1,4 @@
-import type { Scene, Label, ApiErrorPayload } from "../models/types";
+import type { Scene, Label, ApiErrorPayload } from "../modules/types";
 
 export type ApiClientOptions = {
   /** 例如 "/api/v1"；也可传完整 URL（如 "http://127.0.0.1:8000/api/v1"） */

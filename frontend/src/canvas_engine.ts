@@ -1,4 +1,4 @@
-import type { Scene, Endpoint, Point, Resolution, Node, Net } from "./models/types";
+import type { Scene, Endpoint, Point, Resolution, Node, Net } from "./modules/types";
 
 export type CanvasEngineOptions = { resolution: Resolution; vocab: any };
 
