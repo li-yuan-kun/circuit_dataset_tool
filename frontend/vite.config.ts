@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
   return {
     // 设计文档里 index.html 放在 src/ 下
     root: path.resolve(__dirname, "src"),
+    // root=src 时，public 仍放在 frontend/public，构建时原样拷贝
     publicDir: path.resolve(__dirname, "public"),
     base: "./",
     resolve: {
@@ -35,6 +36,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      // outDir 指向 frontend/dist，开发与构建都能稳定解析入口与样式资源
       outDir: path.resolve(__dirname, "dist"),
       emptyOutDir: true,
       sourcemap: true,
