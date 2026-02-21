@@ -24,6 +24,20 @@ function toNum(value: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function getPinsFromVocab(vocab: any, type: string): string[] {
+  const pins = vocab?.types?.[type]?.pins;
+  if (!pins) return [];
+  if (Array.isArray(pins)) {
+    return pins
+      .map((it) => String(it?.name ?? it?.id ?? it?.pin ?? ""))
+      .filter(Boolean);
+  }
+  if (typeof pins === "object") {
+    return Object.keys(pins);
+  }
+  return [];
+}
+
 function downloadBlob(name: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -108,6 +122,22 @@ export async function bootstrapApp(): Promise<void> {
 
   bindPalette(engine, render, log, vocab);
   bindMaskPaint(maskCanvas, maskLayer, () => state.mode === "mask", render);
+  bindCircuitInteractions({
+    engine,
+    circuitCanvas,
+    uiCanvas: byId<HTMLCanvasElement>("ui-canvas"),
+    canEdit: () => state.mode === "circuit",
+    render,
+    onChange: syncScene,
+    log,
+  });
+  bindPresets(engine, vocab, () => {
+    state.label = null;
+    state.maskBlob = null;
+    syncScene();
+    refreshLabelUi();
+    render();
+  }, log);
 
   byId<HTMLButtonElement>("btn-new").addEventListener("click", () => {
     engine.clear();
@@ -314,6 +344,179 @@ export async function bootstrapApp(): Promise<void> {
   refreshLabelUi();
   render();
   log("应用初始化完成");
+}
+
+function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, log: (msg: string) => void): void {
+  const addChain = (types: string[], y: number): string[] => {
+    return types.map((type, idx) => engine.addNode(type, { x: 180 + idx * 180, y }));
+  };
+
+  const connectByEnds = (nodeA: string, typeA: string, nodeB: string, typeB: string): void => {
+    const pinsA = getPinsFromVocab(vocab, typeA);
+    const pinsB = getPinsFromVocab(vocab, typeB);
+    if (!pinsA.length || !pinsB.length) return;
+    engine.connectPins({ node: nodeA, pin: pinsA[pinsA.length - 1] }, { node: nodeB, pin: pinsB[0] });
+  };
+
+  byId<HTMLButtonElement>("btn-preset-vrcgnd").addEventListener("click", () => {
+    engine.clear();
+    const types = ["V", "R", "C", "GND"];
+    const ids = addChain(types, 360);
+    for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
+    afterApply();
+    log("已加载预设：V-R-C-GND（4 器件）");
+  });
+
+  byId<HTMLButtonElement>("btn-preset-rc-parallel").addEventListener("click", () => {
+    engine.clear();
+    const v = engine.addNode("V", { x: 200, y: 380 });
+    const r = engine.addNode("R", { x: 420, y: 300 });
+    const c = engine.addNode("C", { x: 420, y: 460 });
+    const gnd = engine.addNode("GND", { x: 680, y: 380 });
+    connectByEnds(v, "V", r, "R");
+    connectByEnds(v, "V", c, "C");
+    connectByEnds(r, "R", gnd, "GND");
+    connectByEnds(c, "C", gnd, "GND");
+    afterApply();
+    log("已加载预设：R∥C + GND（4 器件）");
+  });
+
+  byId<HTMLButtonElement>("btn-preset-rcladder").addEventListener("click", () => {
+    engine.clear();
+    const types = ["V", "R", "C", "R", "GND"];
+    const ids = addChain(types, 380);
+    for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
+    afterApply();
+    log("已加载预设：R-C-R 梯形（5 器件）");
+  });
+}
+
+function bindCircuitInteractions(opts: {
+  engine: CanvasEngine;
+  circuitCanvas: HTMLCanvasElement;
+  uiCanvas: HTMLCanvasElement;
+  canEdit: () => boolean;
+  render: () => void;
+  onChange: () => void;
+  log: (msg: string) => void;
+}): void {
+  const { engine, uiCanvas, canEdit, render, onChange, log } = opts;
+  const uiCtx = uiCanvas.getContext("2d");
+  let draggingNodeId: string | null = null;
+  let dragOffset = { x: 0, y: 0 };
+  let wiringFrom: { node: string; pin: string } | null = null;
+  let hoverPoint: { x: number; y: number } | null = null;
+
+  const point = (ev: MouseEvent) => {
+    const rect = uiCanvas.getBoundingClientRect();
+    return {
+      x: ((ev.clientX - rect.left) / rect.width) * uiCanvas.width,
+      y: ((ev.clientY - rect.top) / rect.height) * uiCanvas.height,
+    };
+  };
+
+  const drawUi = () => {
+    if (!uiCtx) return;
+    uiCtx.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
+    if (!wiringFrom) return;
+    const fromXY = engine.endpointPosition(wiringFrom);
+    const to = hoverPoint ?? fromXY;
+    uiCtx.save();
+    uiCtx.strokeStyle = "#1e88e5";
+    uiCtx.lineWidth = 2;
+    uiCtx.setLineDash([6, 4]);
+    uiCtx.beginPath();
+    uiCtx.moveTo(fromXY.x, fromXY.y);
+    uiCtx.lineTo(to.x, to.y);
+    uiCtx.stroke();
+    uiCtx.restore();
+  };
+
+  const redrawAll = () => {
+    render();
+    drawUi();
+  };
+
+  uiCanvas.addEventListener("mousedown", (ev) => {
+    if (!canEdit()) return;
+    const p = point(ev);
+    const hitPin = engine.hitTestPin(p);
+    if (hitPin) {
+      wiringFrom = hitPin;
+      hoverPoint = p;
+      redrawAll();
+      return;
+    }
+
+    const hitNodeId = engine.hitTestNode(p);
+    if (!hitNodeId) {
+      engine.setSelection(null);
+      redrawAll();
+      return;
+    }
+
+    const node = engine.getNodeById(hitNodeId);
+    engine.setSelection({ nodeId: hitNodeId });
+    if (node) {
+      draggingNodeId = hitNodeId;
+      dragOffset = { x: p.x - node.pos.x, y: p.y - node.pos.y };
+    }
+    redrawAll();
+  });
+
+  window.addEventListener("mousemove", (ev) => {
+    if (!canEdit()) return;
+    const p = point(ev);
+    hoverPoint = p;
+    if (draggingNodeId) {
+      engine.moveNode(draggingNodeId, { x: p.x - dragOffset.x, y: p.y - dragOffset.y });
+      onChange();
+    }
+    render();
+    drawUi();
+  });
+
+  window.addEventListener("mouseup", (ev) => {
+    if (!canEdit()) return;
+    const p = point(ev);
+    if (draggingNodeId) {
+      draggingNodeId = null;
+      onChange();
+      redrawAll();
+      return;
+    }
+
+    if (!wiringFrom) return;
+    const targetPin = engine.hitTestPin(p);
+    if (targetPin && !(targetPin.node === wiringFrom.node && targetPin.pin === wiringFrom.pin)) {
+      try {
+        engine.connectPins(wiringFrom, targetPin);
+        onChange();
+        log(`已连线：${wiringFrom.node}.${wiringFrom.pin} -> ${targetPin.node}.${targetPin.pin}`);
+      } catch {
+        // ignore
+      }
+    }
+    wiringFrom = null;
+    redrawAll();
+  });
+
+  window.addEventListener("keydown", (ev) => {
+    if (!canEdit()) return;
+    if (ev.key !== "Delete" && ev.key !== "Backspace") return;
+    const sel = engine.getSelection();
+    if (sel?.nodeId) {
+      engine.removeNode(sel.nodeId);
+      onChange();
+      redrawAll();
+      log(`已删除器件：${sel.nodeId}`);
+    } else if (sel?.netId) {
+      engine.removeNet(sel.netId);
+      onChange();
+      redrawAll();
+      log(`已删除连线：${sel.netId}`);
+    }
+  });
 }
 
 function bindMaskPaint(
