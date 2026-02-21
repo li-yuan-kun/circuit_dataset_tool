@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480">
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <text x="40" y="50" font-size="30" fill="#0f172a" font-family="Arial, sans-serif">最小功能演示：V1 -> R1 -> C1 -> GND</text>
+
+  <circle cx="120" cy="240" r="42" fill="#dbeafe" stroke="#1d4ed8" stroke-width="5"/>
+  <text x="120" y="248" text-anchor="middle" font-size="28" fill="#1e3a8a" font-family="Arial, sans-serif">V1</text>
+
+  <line x1="162" y1="240" x2="270" y2="240" stroke="#334155" stroke-width="6"/>
+
+  <polyline points="270,240 290,210 310,270 330,210 350,270 370,210 390,270 410,240" fill="none" stroke="#0f172a" stroke-width="6"/>
+  <text x="340" y="310" text-anchor="middle" font-size="24" fill="#0f172a" font-family="Arial, sans-serif">R1</text>
+
+  <line x1="410" y1="240" x2="500" y2="240" stroke="#334155" stroke-width="6"/>
+  <line x1="500" y1="190" x2="500" y2="290" stroke="#0f172a" stroke-width="8"/>
+  <line x1="540" y1="190" x2="540" y2="290" stroke="#0f172a" stroke-width="8"/>
+  <line x1="540" y1="240" x2="650" y2="240" stroke="#334155" stroke-width="6"/>
+  <text x="520" y="310" text-anchor="middle" font-size="24" fill="#0f172a" font-family="Arial, sans-serif">C1</text>
+
+  <line x1="650" y1="240" x2="760" y2="240" stroke="#334155" stroke-width="6"/>
+  <line x1="760" y1="240" x2="760" y2="290" stroke="#334155" stroke-width="6"/>
+  <line x1="730" y1="290" x2="790" y2="290" stroke="#0f172a" stroke-width="6"/>
+  <line x1="738" y1="304" x2="782" y2="304" stroke="#0f172a" stroke-width="6"/>
+  <line x1="746" y1="318" x2="774" y2="318" stroke="#0f172a" stroke-width="6"/>
+  <text x="760" y="360" text-anchor="middle" font-size="24" fill="#0f172a" font-family="Arial, sans-serif">GND</text>
+
+  <rect x="30" y="380" width="900" height="70" rx="10" fill="#e2e8f0"/>
+  <text x="50" y="423" font-size="24" fill="#334155" font-family="Arial, sans-serif">在前端中可搜索并添加器件类型：V / R / C / GND，然后拖拽引脚完成连线。</text>
+</svg>
