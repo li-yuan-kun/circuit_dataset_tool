@@ -1,4 +1,4 @@
-import { ApiClient } from "./api/client";
+import { ApiClient } from "./backend_client";
 import { CanvasEngine } from "./canvas_engine";
 import { MaskLayer } from "./make_layer";
 import type { Label, Scene } from "./modules/types";
