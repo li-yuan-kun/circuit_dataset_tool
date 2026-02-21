@@ -69,52 +69,91 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 4.2 启动前端（Vite）
 
-> ⚠️ **当前前端状态：未完成，缺失入口与构建配置（例如 `package.json`）**。  
-> 也就是说，当前仓库下的前端代码还不能直接通过 `npm run dev` 启动。
-
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend
+npm install
+npm run dev
 ```
 
 打开终端输出的地址（通常是 `http://127.0.0.1:5173`）。
 
-> 如果前端需要配置后端地址，请查看/修改 `frontend/src/api/client.ts` 中的 API base URL（常见为 `VITE_API_BASE_URL` 或硬编码默认值）。
+---
 
-#### 4.2.1 如果你已补齐前端（可直接复制）
+## 5. 前端使用说明（零代码基础版）
 
-当你补齐前端入口与构建配置后，可按下面步骤启动：
+下面这部分按“普通用户只会点网页按钮”的方式来写，你不需要会编程。
 
-```bash
-cd /path/to/circuit_dataset_tool/frontend
+### 5.1 第一次打开页面后先做这 3 件事
 
-# 1) 检查 Node 版本（建议 >= 18）
-node -v
+1. 看右上角 `后端 Base URL`，默认填 `http://localhost:8000/api/v1`。
+2. 点击右上角 `Health`。
+3. 如果状态栏提示成功，就可以开始画图；如果失败，先确认后端是否已启动。
 
-# 2) 安装依赖
-npm install
+### 5.2 最常用按钮（先认识再操作）
 
-# 3) 启动开发服务器
-npm run dev
-```
+- 顶栏：
+  - `新建`：清空当前电路和遮挡层。
+  - `导入 scene.json` / `导出 scene.json`：读取或保存电路结构。
+  - `电路编辑` / `Mask 编辑`：切换“画电路”与“画遮挡”。
+  - `导出 image.png` / `导出 mask.png`：导出图像。
+  - `导出本地样本包`：打包下载最小样本。
+- 左栏：
+  - `器件库`：搜索并添加器件（如 R、C、V、GND）。
+  - `Mask 工具`：涂抹/擦除/自动生成遮挡区域。
+- 右栏：
+  - `校验 Scene`：检查场景是否合法。
+  - `计算 Label`：根据当前 mask 计算标注结果。
+  - `Shuffle`：保持连线关系不变，自动换布局。
+  - `保存到后端数据集`：把 image/mask/scene/label 一起落盘。
 
-预期目录树（最小可运行）：
+### 5.3 一次完整操作（建议严格按顺序）
 
-```text
-frontend/
-├── package.json
-├── package-lock.json           # 或 pnpm-lock.yaml / yarn.lock
-├── vite.config.ts
-├── index.html                  # 或 src/index.html + 正确入口映射
-└── src/
-    ├── main.ts                 # 入口文件（示例）
-    ├── api/
-    │   └── client.ts
-    └── ...
-```
+1. **点击 `新建`**，保证画布干净。
+2. 在左侧 `器件库` 搜索 `R`，点击添加一个电阻；再搜索 `C` 添加一个电容。
+3. 鼠标拖拽器件到合适位置（例如从左到右）。
+4. **连线**：从一个器件引脚拖到另一个器件引脚。
+5. 点击 `导出 scene.json` 先保存一次结构。
+6. 切到 `Mask 编辑` 模式，使用 `涂抹` 在器件上画一点遮挡（黑色区域）。
+7. 点击 `计算 Label`，右侧会出现 JSON 结果。
+8. 需要增强数据时点击 `Shuffle`，系统会自动换布局。
+9. 最后点击 `导出 image.png`、`导出 mask.png`、`导出 scene.json`（以及右侧 `保存到后端数据集`）。
+
+### 5.4 常见问题（给非技术用户）
+
+- **点了按钮没反应**：先看网页底部/右侧状态日志，通常会提示具体失败原因。
+- **Health 失败**：大概率后端没启动，或者 Base URL 写错。
+- **算 Label 报错**：通常是没有有效 mask，先在 `Mask 编辑` 中手动画几笔再试。
+- **导入失败**：请确认文件名和类型匹配（`scene.json` 用导入 scene，`mask.png` 用导入 mask）。
+
+### 5.5 基础器件预设图片（最小功能演示可直接参考）
+
+> 这些图用于“先照着摆出来跑通流程”。你可以按图先做最小演示，再做复杂电路。
+
+- 电阻（R）：
+
+![电阻预设图](docs/presets/resistor.svg)
+
+- 电容（C）：
+
+![电容预设图](docs/presets/capacitor.svg)
+
+- 最小连通示例（V1 -> R1 -> C1 -> GND）：
+
+![最小电路演示图](docs/presets/minimal_demo.svg)
+
+### 5.6 “最小可跑通”演示清单
+
+按下面做，你应该能在 3~5 分钟内看到完整结果：
+
+1. 添加 `V`、`R`、`C`、`GND` 四类器件。
+2. 连成一条链：`V -> R -> C -> GND`。
+3. 切到 `Mask 编辑`，在 `R` 上轻涂一块遮挡。
+4. 点击 `计算 Label`，确认右侧出现 `counts_visible` / `occlusion`。
+5. 点击 `导出 image.png`、`导出 mask.png`、`导出 scene.json`。
 
 ---
 
-## 5. 推荐使用流程（UI 端到端）
+## 6. 推荐使用流程（UI 端到端）
 
 1) **绘制电路**：拖拽器件 + 连线（nodes/nets），得到 `scene.json`  
 2) **准备 mask**：  
@@ -126,11 +165,11 @@ frontend/
 
 ---
 
-## 6. 后端 API（最小集合）
+## 7. 后端 API（最小集合）
 
 > 默认前缀：`/api/v1`
 
-### 6.1 校验 scene
+### 7.1 校验 scene
 
 **POST** `/scene/validate`
 
@@ -147,7 +186,7 @@ frontend/
 
 ---
 
-### 6.2 生成不规则 mask（自动遮挡）
+### 7.2 生成不规则 mask（自动遮挡）
 
 **POST** `/mask/generate`
 
@@ -177,7 +216,7 @@ frontend/
 
 ---
 
-### 6.3 计算 label（遮挡率 + 可见计数）
+### 7.3 计算 label（遮挡率 + 可见计数）
 
 **POST** `/label/compute`
 
@@ -211,7 +250,7 @@ frontend/
 
 ---
 
-### 6.4 shuffle 布局（保持 netlist 不变）
+### 7.4 shuffle 布局（保持 netlist 不变）
 
 **POST** `/topology/shuffle`
 
@@ -229,7 +268,7 @@ frontend/
 
 ---
 
-### 6.5 保存样本到数据集（落盘 + 更新 manifest）
+### 7.5 保存样本到数据集（落盘 + 更新 manifest）
 
 #### A) multipart 方式（推荐：直接上传四个文件）
 
