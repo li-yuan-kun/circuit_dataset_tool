@@ -283,6 +283,17 @@ def create_app() -> FastAPI:
     async def _healthz():
         return healthz(app)
 
+    @app.get(api_prefix, tags=["meta"])
+    async def _api_root():
+        """A friendly API root to avoid 404 on GET /api/v1."""
+
+        return {
+            "ok": True,
+            "message": "Circuit Dataset Tool API",
+            "docs": f"{api_prefix}/docs",
+            "openapi": f"{api_prefix}/openapi.json",
+        }
+
     return app
 
 
