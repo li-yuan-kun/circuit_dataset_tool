@@ -7,7 +7,7 @@ This module follows the v0.3 design document:
 - include_routers(): mount /api/v1 routers
 - register_middlewares(): CORS, request_id, timing, etc.
 - register_exception_handlers(): unified error response
-- healthz(): GET /healthz
+- healthz(): GET /healthz (also exposed at {API_PREFIX}/healthz)
 """
 
 from __future__ import annotations
@@ -212,7 +212,7 @@ def include_routers(app: FastAPI) -> None:
 
 
 def healthz(app: FastAPI) -> Dict[str, Any]:
-    """Health payload for GET /healthz."""
+    """Health payload for GET /healthz and {API_PREFIX}/healthz."""
 
     settings = getattr(app.state, "settings", None)
     return {
@@ -280,6 +280,7 @@ def create_app() -> FastAPI:
     include_routers(app)
 
     @app.get("/healthz", tags=["health"])
+    @app.get(f"{api_prefix}/healthz", tags=["health"])
     async def _healthz():
         return healthz(app)
 
