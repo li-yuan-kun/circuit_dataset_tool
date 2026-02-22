@@ -92,6 +92,9 @@ export class CanvasEngine {
 
   private nodeSeq = 1;
   private netSeq = 1;
+  private readonly pathCache = new Map<string, { hash: string; path: Point[]; failed: boolean }>();
+  private pendingPathRefreshNodes = new Set<string>();
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: CanvasEngineOptions) {
     this.resolution = opts.resolution;
@@ -166,28 +169,44 @@ export class CanvasEngine {
     const n = this.scene.nodes.find((x) => x.id === nodeId);
     if (!n) return;
     n.pos = { ...pos };
-    this.refreshNetPathsForNode(nodeId);
+    this.scheduleRefreshNetPathsForNode(nodeId);
   }
 
   rotateNode(nodeId: string, rot: number): void {
     const n = this.scene.nodes.find((x) => x.id === nodeId);
     if (!n) return;
     n.rot = rot;
-    this.refreshNetPathsForNode(nodeId);
+    this.scheduleRefreshNetPathsForNode(nodeId);
   }
 
   scaleNode(nodeId: string, scale: number): void {
     const n = this.scene.nodes.find((x) => x.id === nodeId);
     if (!n) return;
     n.scale = Math.max(0.05, Number(scale));
-    this.refreshNetPathsForNode(nodeId);
+    this.scheduleRefreshNetPathsForNode(nodeId);
   }
 
   private refreshNetPathsForNode(nodeId: string): void {
+    this.pathCache.clear();
     for (const net of this.scene.nets) {
       if (net.from.node !== nodeId && net.to.node !== nodeId) continue;
       net.path = this.computeDefaultNetPath(net);
     }
+  }
+
+  private scheduleRefreshNetPathsForNode(nodeId: string): void {
+    this.pendingPathRefreshNodes.add(nodeId);
+    if (this.refreshTimer) return;
+    this.refreshTimer = setTimeout(() => {
+      const changed = new Set(this.pendingPathRefreshNodes);
+      this.pendingPathRefreshNodes.clear();
+      this.refreshTimer = null;
+      this.pathCache.clear();
+      for (const net of this.scene.nets) {
+        if (!changed.has(net.from.node) && !changed.has(net.to.node)) continue;
+        net.path = this.computeDefaultNetPath(net);
+      }
+    }, 16);
   }
 
   connectPins(from: Endpoint, to: Endpoint): { id: string; replacedOld: boolean } {
@@ -438,6 +457,19 @@ export class CanvasEngine {
   }
 
   private reroutePolylineAvoidObstacles(path: Point[], net: Net): Point[] {
+    const p0 = this.endpointXY(net.from);
+    const p1 = this.endpointXY(net.to);
+    const leadLen = 12;
+    const p0Out = this.endpointOutPoint(net.from, p0, leadLen);
+    const p1Out = this.endpointOutPoint(net.to, p1, leadLen);
+
+    const astar = this.findOrthogonalGridRoute(net, p0, p0Out, p1, p1Out);
+    if (astar) {
+      (net as any).route_status = "ok";
+      (net as any).route_message = undefined;
+      return astar;
+    }
+
     const obstacles = this.netObstacles(net);
 
     const tryPaths: Point[][] = [path];
@@ -456,12 +488,26 @@ export class CanvasEngine {
     }
 
     for (const candidate of tryPaths) {
-      if (!this.pathIntersectsBBoxes(candidate, obstacles)) return candidate;
+      if (!this.pathIntersectsBBoxes(candidate, obstacles)) {
+        (net as any).route_status = "ok";
+        (net as any).route_message = undefined;
+        return candidate;
+      }
     }
+    (net as any).route_status = "failed";
+    (net as any).route_message = "避障失败";
     return path;
   }
 
   private computeDefaultNetPath(net: Net): Point[] {
+    const hash = this.routingHash(net);
+    const cached = this.pathCache.get(net.id);
+    if (cached && cached.hash === hash) {
+      (net as any).route_status = cached.failed ? "failed" : "ok";
+      (net as any).route_message = cached.failed ? "避障失败" : undefined;
+      return cached.path.map((p) => ({ ...p }));
+    }
+
     const p0 = this.endpointXY(net.from);
     const p1 = this.endpointXY(net.to);
     const leadLen = 12;
@@ -478,7 +524,147 @@ export class CanvasEngine {
     const hvPenalty = this.pathIntersectsBBoxes(hv.slice(1, hv.length - 1), endpointBoxes) ? 1 : 0;
     const vhPenalty = this.pathIntersectsBBoxes(vh.slice(1, vh.length - 1), endpointBoxes) ? 1 : 0;
     const base = hvPenalty <= vhPenalty ? hv : vh;
-    return this.reroutePolylineAvoidObstacles(base, net);
+    const routed = this.reroutePolylineAvoidObstacles(base, net);
+    const failed = String((net as any).route_status ?? "") === "failed";
+    this.pathCache.set(net.id, { hash, path: routed.map((p) => ({ ...p })), failed });
+    return routed;
+  }
+
+  private routingHash(net: Net): string {
+    const nodeSig = this.scene.nodes
+      .map((n) => `${n.id}:${n.pos.x.toFixed(1)},${n.pos.y.toFixed(1)},${Number(n.rot ?? 0).toFixed(3)},${Number(n.scale ?? 1).toFixed(3)}`)
+      .sort()
+      .join("|");
+    return `${net.from.node}.${net.from.pin}->${net.to.node}.${net.to.pin}#${nodeSig}`;
+  }
+
+  private findOrthogonalGridRoute(net: Net, p0: Point, p0Out: Point, p1: Point, p1Out: Point): Point[] | null {
+    const grid = Math.max(8, Math.min(16, 12));
+    const inflate = grid;
+    const cols = Math.ceil(this.resolution.w / grid);
+    const rows = Math.ceil(this.resolution.h / grid);
+    const blocked = new Uint8Array(cols * rows);
+    const idx = (x: number, y: number) => y * cols + x;
+    const clampCell = (v: number, max: number) => Math.max(0, Math.min(max - 1, v));
+    const toCell = (p: Point) => ({ x: clampCell(Math.round(p.x / grid), cols), y: clampCell(Math.round(p.y / grid), rows) });
+    const cellCenter = (x: number, y: number): Point => ({ x: x * grid, y: y * grid });
+
+    const markBox = (bb: BBox) => {
+      const x0 = clampCell(Math.floor(bb.x0 / grid), cols);
+      const y0 = clampCell(Math.floor(bb.y0 / grid), rows);
+      const x1 = clampCell(Math.ceil(bb.x1 / grid), cols);
+      const y1 = clampCell(Math.ceil(bb.y1 / grid), rows);
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) blocked[idx(x, y)] = 1;
+      }
+    };
+
+    for (const n of this.scene.nodes) {
+      const bb = this.nodeBBox(n.id);
+      if (!bb) continue;
+      markBox({ x0: bb.x0 - inflate, y0: bb.y0 - inflate, x1: bb.x1 + inflate, y1: bb.y1 + inflate });
+    }
+
+    const clearLead = (a: Point, b: Point): void => {
+      const n = Math.max(2, Math.ceil(Math.hypot(a.x - b.x, a.y - b.y) / (grid / 2)));
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const cx = a.x + (b.x - a.x) * t;
+        const cy = a.y + (b.y - a.y) * t;
+        const c = toCell({ x: cx, y: cy });
+        blocked[idx(c.x, c.y)] = 0;
+      }
+    };
+    clearLead(p0, p0Out);
+    clearLead(p1, p1Out);
+
+    const start = toCell(p0Out);
+    const goal = toCell(p1Out);
+    blocked[idx(start.x, start.y)] = 0;
+    blocked[idx(goal.x, goal.y)] = 0;
+
+    const open: Array<{ x: number; y: number; f: number; g: number }> = [{ x: start.x, y: start.y, g: 0, f: Math.abs(goal.x - start.x) + Math.abs(goal.y - start.y) }];
+    const gScore = new Float64Array(cols * rows);
+    gScore.fill(Number.POSITIVE_INFINITY);
+    gScore[idx(start.x, start.y)] = 0;
+    const parent = new Int32Array(cols * rows);
+    parent.fill(-1);
+    const closed = new Uint8Array(cols * rows);
+
+    while (open.length) {
+      open.sort((a, b) => a.f - b.f);
+      const cur = open.shift()!;
+      const cid = idx(cur.x, cur.y);
+      if (closed[cid]) continue;
+      closed[cid] = 1;
+      if (cur.x === goal.x && cur.y === goal.y) break;
+
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = cur.x + dx;
+        const ny = cur.y + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const nid = idx(nx, ny);
+        if (blocked[nid] || closed[nid]) continue;
+        const ng = cur.g + 1;
+        if (ng >= gScore[nid]) continue;
+        gScore[nid] = ng;
+        parent[nid] = cid;
+        const h = Math.abs(goal.x - nx) + Math.abs(goal.y - ny);
+        open.push({ x: nx, y: ny, g: ng, f: ng + h });
+      }
+    }
+
+    if (parent[idx(goal.x, goal.y)] < 0 && (start.x !== goal.x || start.y !== goal.y)) return null;
+
+    const cells: Array<{ x: number; y: number }> = [];
+    let curId = idx(goal.x, goal.y);
+    cells.push({ x: goal.x, y: goal.y });
+    while (curId !== idx(start.x, start.y)) {
+      curId = parent[curId];
+      if (curId < 0) return null;
+      cells.push({ x: curId % cols, y: Math.floor(curId / cols) });
+    }
+    cells.reverse();
+
+    const mids: Point[] = [];
+    for (let i = 0; i < cells.length; i++) {
+      if (i === 0 || i === cells.length - 1) {
+        mids.push(cellCenter(cells[i].x, cells[i].y));
+        continue;
+      }
+      const a = cells[i - 1];
+      const b = cells[i];
+      const c = cells[i + 1];
+      const dir1x = b.x - a.x;
+      const dir1y = b.y - a.y;
+      const dir2x = c.x - b.x;
+      const dir2y = c.y - b.y;
+      if (dir1x !== dir2x || dir1y !== dir2y) mids.push(cellCenter(b.x, b.y));
+    }
+
+    const merged = this.simplifyOrthogonalPath([p0, p0Out, ...mids, p1Out, p1]);
+    const obstacles = this.netObstacles(net);
+    if (this.pathIntersectsBBoxes(merged, obstacles)) return null;
+    return merged;
+  }
+
+  private simplifyOrthogonalPath(path: Point[]): Point[] {
+    const out: Point[] = [];
+    for (const p of path) {
+      const last = out[out.length - 1];
+      if (last && Math.abs(last.x - p.x) < 0.01 && Math.abs(last.y - p.y) < 0.01) continue;
+      out.push({ ...p });
+      while (out.length >= 3) {
+        const a = out[out.length - 3];
+        const b = out[out.length - 2];
+        const c = out[out.length - 1];
+        const sameX = Math.abs(a.x - b.x) < 0.01 && Math.abs(b.x - c.x) < 0.01;
+        const sameY = Math.abs(a.y - b.y) < 0.01 && Math.abs(b.y - c.y) < 0.01;
+        if (!sameX && !sameY) break;
+        out.splice(out.length - 2, 1);
+      }
+    }
+    return out;
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -526,6 +712,13 @@ export class CanvasEngine {
       const routeFailed = String((e as any).route_status ?? "") === "failed";
       ctx.strokeStyle = routeFailed ? "#e53935" : (isSel ? "#1e88e5" : "#444");
       ctx.stroke();
+
+      if (routeFailed) {
+        const mid = path[Math.floor(path.length / 2)] ?? path[0];
+        ctx.fillStyle = "#e53935";
+        ctx.font = "12px sans-serif";
+        ctx.fillText("避障失败", mid.x + 8, mid.y - 8);
+      }
 
       const pStart = path[0];
       const pEnd = path[path.length - 1];
