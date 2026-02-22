@@ -168,7 +168,7 @@ export class CanvasEngine {
     n.scale = Math.max(0.05, Number(scale));
   }
 
-  connectPins(from: Endpoint, to: Endpoint): string {
+  connectPins(from: Endpoint, to: Endpoint): { id: string; replacedOld: boolean } {
     if (!from?.node || !from?.pin || !to?.node || !to?.pin) {
       throw new Error("connectPins: invalid endpoints");
     }
@@ -176,12 +176,26 @@ export class CanvasEngine {
       throw new Error("connectPins: cannot connect a pin to itself");
     }
 
+    const isSameEndpoint = (a: Endpoint, b: Endpoint): boolean => a.node === b.node && a.pin === b.pin;
+    const isSameConnection = (net: Net): boolean => {
+      const sameDirection = isSameEndpoint(net.from, from) && isSameEndpoint(net.to, to);
+      const reverseDirection = isSameEndpoint(net.from, to) && isSameEndpoint(net.to, from);
+      return sameDirection || reverseDirection;
+    };
+
+    const existingNetIds = this.scene.nets.filter((net) => isSameConnection(net)).map((net) => net.id);
+    const replacedOld = existingNetIds.length > 0;
+    if (replacedOld) {
+      this.scene.nets = this.scene.nets.filter((net) => !existingNetIds.includes(net.id));
+      if (this.sel?.netId && existingNetIds.includes(this.sel.netId)) this.sel = null;
+    }
+
     const id = `e${this.netSeq++}`;
     const net: Net = { id, from: { ...from }, to: { ...to }, path: [] };
     this.scene.nets.push(net);
     // 立即生成一条简单路径，便于显示
     net.path = this.computeDefaultNetPath(net);
-    return id;
+    return { id, replacedOld };
   }
 
   removeNet(netId: string): void {
