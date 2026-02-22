@@ -19,6 +19,19 @@ function byId<T extends HTMLElement>(id: string): T {
   return el as T;
 }
 
+function maybeById<T extends HTMLElement>(id: string): T | null {
+  return document.getElementById(id) as T | null;
+}
+
+function bindOptionalClick(id: string, handler: () => void, log?: (msg: string) => void): void {
+  const el = maybeById<HTMLButtonElement>(id);
+  if (!el) {
+    log?.(`⚠️ 可选按钮缺失，已跳过绑定：#${id}`);
+    return;
+  }
+  el.addEventListener("click", handler);
+}
+
 function toNum(value: string, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -53,11 +66,12 @@ function userFacingError(err: unknown, fallback: string): string {
 }
 
 export async function bootstrapApp(): Promise<void> {
+  // 必需元素：缺失时直接抛错，避免进入半初始化状态
   const statusLog = byId<HTMLPreElement>("status-log");
   const labelJsonEl = byId<HTMLTextAreaElement>("label-json");
   const labelSummaryEl = byId<HTMLDivElement>("label-summary");
-
   const circuitCanvas = byId<HTMLCanvasElement>("circuit-canvas");
+  const uiCanvas = byId<HTMLCanvasElement>("ui-canvas");
   const maskCanvas = byId<HTMLCanvasElement>("mask-canvas");
 
   const circuitCtx = circuitCanvas.getContext("2d");
@@ -125,7 +139,7 @@ export async function bootstrapApp(): Promise<void> {
   bindCircuitInteractions({
     engine,
     circuitCanvas,
-    uiCanvas: byId<HTMLCanvasElement>("ui-canvas"),
+    uiCanvas,
     canEdit: () => state.mode === "circuit",
     render,
     onChange: syncScene,
@@ -137,6 +151,29 @@ export async function bootstrapApp(): Promise<void> {
     syncScene();
     refreshLabelUi();
     render();
+  }, log);
+
+  // 可选功能元素：缺失不影响主流程
+  bindOptionalClick("btn-export-local", () => {
+    log("本地样本包导出功能暂未接入，已跳过");
+  }, log);
+
+  bindOptionalClick("btn-apply-function", () => {
+    const customValue = byId<HTMLInputElement>("function-custom").value.trim();
+    const selectEl = byId<HTMLSelectElement>("function-select");
+    if (!customValue) {
+      log("Function 未填写自定义值，保留当前选择");
+      return;
+    }
+    const exists = Array.from(selectEl.options).some((opt) => opt.value === customValue);
+    if (!exists) {
+      const opt = document.createElement("option");
+      opt.value = customValue;
+      opt.textContent = customValue;
+      selectEl.appendChild(opt);
+    }
+    selectEl.value = customValue;
+    log(`Function 已应用：${customValue}`);
   }, log);
 
   byId<HTMLButtonElement>("btn-new").addEventListener("click", () => {
@@ -358,16 +395,16 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
     engine.connectPins({ node: nodeA, pin: pinsA[pinsA.length - 1] }, { node: nodeB, pin: pinsB[0] });
   };
 
-  byId<HTMLButtonElement>("btn-preset-vrcgnd").addEventListener("click", () => {
+  bindOptionalClick("btn-preset-vrcgnd", () => {
     engine.clear();
     const types = ["V", "R", "C", "GND"];
     const ids = addChain(types, 360);
     for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
     afterApply();
     log("已加载预设：V-R-C-GND（4 器件）");
-  });
+  }, log);
 
-  byId<HTMLButtonElement>("btn-preset-rc-parallel").addEventListener("click", () => {
+  bindOptionalClick("btn-preset-rc-parallel", () => {
     engine.clear();
     const v = engine.addNode("V", { x: 200, y: 380 });
     const r = engine.addNode("R", { x: 420, y: 300 });
@@ -379,16 +416,16 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
     connectByEnds(c, "C", gnd, "GND");
     afterApply();
     log("已加载预设：R∥C + GND（4 器件）");
-  });
+  }, log);
 
-  byId<HTMLButtonElement>("btn-preset-rcladder").addEventListener("click", () => {
+  bindOptionalClick("btn-preset-rcladder", () => {
     engine.clear();
     const types = ["V", "R", "C", "R", "GND"];
     const ids = addChain(types, 380);
     for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
     afterApply();
     log("已加载预设：R-C-R 梯形（5 器件）");
-  });
+  }, log);
 }
 
 function bindCircuitInteractions(opts: {
