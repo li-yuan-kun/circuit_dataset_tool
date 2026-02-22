@@ -1,4 +1,4 @@
-import { ApiClient, ApiError } from "./backend_client";
+import { ApiClient, ApiError, type ApiRequestEvent } from "./backend_client";
 import { CanvasEngine } from "./canvas_engine";
 import { MaskLayer } from "./make_layer";
 import { computeLabelLocalApprox } from "./modules/label_local";
@@ -162,7 +162,32 @@ export async function bootstrapApp(): Promise<void> {
     } catch {
       // ignore
     }
-    return new ApiClient({ baseUrl, timeoutMs });
+    return new ApiClient({
+      baseUrl,
+      timeoutMs,
+      onRequestEvent: (event: ApiRequestEvent) => {
+        if (event.phase === "start") {
+          const msg = `请求发起：${event.method} ${event.url} (timeout=${event.timeoutMs}ms)`;
+          updateRequestSummary(`${event.method} ${event.url}`, 0, "PENDING");
+          log(`🌐 ${msg}`);
+          return;
+        }
+
+        if (event.phase === "end") {
+          updateRequestSummary(`${event.method} ${event.url}`, event.elapsedMs, `HTTP ${event.status}`);
+          return;
+        }
+
+        const diagnose =
+          event.errorType === "TypeError"
+            ? "未连通（网络/地址不可达）"
+            : event.errorType === "AbortError"
+              ? "后端慢或阻塞（超时未返回）"
+              : "后端业务错误";
+        updateRequestSummary(`${event.method} ${event.url}`, event.elapsedMs, `${event.errorType} / ${diagnose}`);
+        log(`⚠️ 请求异常：${event.errorType} @ ${event.url}（${diagnose}）`);
+      },
+    });
   };
 
   const syncScene = (): Scene => {
