@@ -423,11 +423,22 @@ export class CanvasEngine {
     return false;
   }
 
-  private reroutePolylineAvoidObstacles(path: Point[], net: Net): Point[] {
-    const obstacles = this.scene.nodes
+  private netObstacles(net: Net): BBox[] {
+    return this.scene.nodes
       .filter((n) => n.id !== net.from.node && n.id !== net.to.node)
       .map((n) => this.nodeBBox(n.id))
       .filter((bb): bb is BBox => !!bb);
+  }
+
+  private validateBackendPath(net: Net, path: Point[]): { ok: boolean; hitObstacle: boolean } {
+    if (!Array.isArray(path) || path.length < 2) return { ok: false, hitObstacle: false };
+    const obstacles = this.netObstacles(net);
+    const hitObstacle = this.pathIntersectsBBoxes(path, obstacles);
+    return { ok: !hitObstacle, hitObstacle };
+  }
+
+  private reroutePolylineAvoidObstacles(path: Point[], net: Net): Point[] {
+    const obstacles = this.netObstacles(net);
 
     const tryPaths: Point[][] = [path];
     if (path.length >= 5) {
@@ -485,7 +496,21 @@ export class CanvasEngine {
     // nets
     for (const e of this.scene.nets) {
       const isSel = this.sel?.netId === e.id;
-      const path = (e.path && e.path.length >= 2) ? e.path : this.computeDefaultNetPath(e);
+      let path = (e.path && e.path.length >= 2) ? e.path : this.computeDefaultNetPath(e);
+      const backendCheck = this.validateBackendPath(e, path);
+      if (!backendCheck.ok) {
+        const fallback = this.reroutePolylineAvoidObstacles(this.computeDefaultNetPath(e), e);
+        const repaired = this.validateBackendPath(e, fallback);
+        if (repaired.ok) {
+          path = fallback;
+          e.path = fallback;
+          (e as any).route_status = "degraded";
+          (e as any).route_constraint_satisfied = false;
+        } else {
+          // 明显告警：高亮问题线网而不是静默绘制
+          (e as any).route_status = "failed";
+        }
+      }
 
       ctx.save();
       ctx.lineJoin = "round";
@@ -498,7 +523,8 @@ export class CanvasEngine {
       ctx.stroke();
 
       ctx.lineWidth = isSel ? 3 : 2;
-      ctx.strokeStyle = isSel ? "#1e88e5" : "#444";
+      const routeFailed = String((e as any).route_status ?? "") === "failed";
+      ctx.strokeStyle = routeFailed ? "#e53935" : (isSel ? "#1e88e5" : "#444");
       ctx.stroke();
 
       const pStart = path[0];

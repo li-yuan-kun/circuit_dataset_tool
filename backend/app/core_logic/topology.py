@@ -29,6 +29,7 @@ The router will call:
 from __future__ import annotations
 
 import copy
+import heapq
 import hashlib
 import json
 import logging
@@ -610,6 +611,123 @@ def _path_hits_any_bbox(path: Sequence[Tuple[float, float]], bboxes: Sequence[Tu
     return False
 
 
+def _compress_polyline(points: Sequence[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    if not points:
+        return []
+    out: List[Tuple[float, float]] = [points[0]]
+    for p in points[1:]:
+        if abs(p[0] - out[-1][0]) > 1e-6 or abs(p[1] - out[-1][1]) > 1e-6:
+            out.append(p)
+    if len(out) <= 2:
+        return out
+    compact: List[Tuple[float, float]] = [out[0]]
+    for i in range(1, len(out) - 1):
+        a = compact[-1]
+        b = out[i]
+        c = out[i + 1]
+        abx, aby = b[0] - a[0], b[1] - a[1]
+        bcx, bcy = c[0] - b[0], c[1] - b[1]
+        if abs(abx * bcy - aby * bcx) <= 1e-6 and (abs(abx) <= 1e-6 or abs(aby) <= 1e-6):
+            continue
+        compact.append(b)
+    compact.append(out[-1])
+    return compact
+
+
+def _astar_manhattan_grid(
+    start: Tuple[int, int],
+    goal: Tuple[int, int],
+    blocked: set[Tuple[int, int]],
+    w_cells: int,
+    h_cells: int,
+) -> Optional[List[Tuple[int, int]]]:
+    if start == goal:
+        return [start]
+    if start in blocked or goal in blocked:
+        return None
+
+    def h(p: Tuple[int, int]) -> int:
+        return abs(p[0] - goal[0]) + abs(p[1] - goal[1])
+
+    open_heap: List[Tuple[int, int, Tuple[int, int]]] = [(h(start), 0, start)]
+    g_score: Dict[Tuple[int, int], int] = {start: 0}
+    came: Dict[Tuple[int, int], Tuple[int, int]] = {}
+
+    while open_heap:
+        _, g_cur, cur = heapq.heappop(open_heap)
+        if cur == goal:
+            path = [cur]
+            while cur in came:
+                cur = came[cur]
+                path.append(cur)
+            path.reverse()
+            return path
+
+        if g_cur != g_score.get(cur):
+            continue
+
+        cx, cy = cur
+        for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+            if nx < 0 or ny < 0 or nx >= w_cells or ny >= h_cells:
+                continue
+            nxt = (nx, ny)
+            if nxt in blocked:
+                continue
+            ng = g_cur + 1
+            if ng < g_score.get(nxt, 1 << 30):
+                came[nxt] = cur
+                g_score[nxt] = ng
+                heapq.heappush(open_heap, (ng + h(nxt), ng, nxt))
+    return None
+
+
+def route_net_orthogonal_avoid_obstacles(
+    p0: Tuple[float, float],
+    p1: Tuple[float, float],
+    *,
+    p0_out: Tuple[float, float],
+    p1_out: Tuple[float, float],
+    obstacles: Sequence[Tuple[float, float, float, float]],
+    resolution: Tuple[int, int],
+    grid_step: float = 12.0,
+) -> Optional[List[Dict[str, float]]]:
+    step = max(4.0, float(grid_step))
+    w = max(step * 2.0, float(resolution[0]))
+    h = max(step * 2.0, float(resolution[1]))
+    w_cells = int(math.floor(w / step)) + 1
+    h_cells = int(math.floor(h / step)) + 1
+
+    def to_grid(p: Tuple[float, float]) -> Tuple[int, int]:
+        return (int(round(p[0] / step)), int(round(p[1] / step)))
+
+    def to_xy(g: Tuple[int, int]) -> Tuple[float, float]:
+        return (float(g[0] * step), float(g[1] * step))
+
+    blocked: set[Tuple[int, int]] = set()
+    for bb in obstacles:
+        x0, y0, x1, y1 = bb
+        gx0 = max(0, int(math.floor(x0 / step)))
+        gy0 = max(0, int(math.floor(y0 / step)))
+        gx1 = min(w_cells - 1, int(math.ceil(x1 / step)))
+        gy1 = min(h_cells - 1, int(math.ceil(y1 / step)))
+        for gx in range(gx0, gx1 + 1):
+            for gy in range(gy0, gy1 + 1):
+                blocked.add((gx, gy))
+
+    s = to_grid(p0_out)
+    t = to_grid(p1_out)
+    blocked.discard(s)
+    blocked.discard(t)
+    grid_path = _astar_manhattan_grid(s, t, blocked, w_cells, h_cells)
+    if not grid_path:
+        return None
+
+    centerline = [to_xy(g) for g in grid_path]
+    full = [p0, p0_out, *centerline, p1_out, p1]
+    compact = _compress_polyline(full)
+    return [_point_to_dict(it) for it in compact]
+
+
 def route_net_two_seg(
     p0: Tuple[float, float],
     p1: Tuple[float, float],
@@ -645,7 +763,8 @@ def route_all_nets(
     *,
     bend_mode: str = "hv",
     rng: Optional[np.random.Generator] = None,
-) -> Dict[str, Any]:
+    route_grid: float = 12.0,
+) -> Tuple[Dict[str, Any], Dict[str, int]]:
     """Generate net paths for all nets and write them back into the scene.
 
     Args:
@@ -665,32 +784,79 @@ def route_all_nets(
     for node_id, node in node_map.items():
         all_bboxes[node_id] = _node_bbox(node, vocab)
 
+    stats = {"success": 0, "degraded": 0, "failed": 0}
+    avoid_mode = m in ("avoid_obstacles", "orthogonal", "maze")
+    resolution = _get_resolution(scene)
+
     for net in _iter_nets(scene):
         fr = net.get("from") or net.get("from_")
         to = net.get("to")
         if not isinstance(fr, dict) or not isinstance(to, dict):
+            net["path"] = []
+            net["route_status"] = "failed"
+            net["route_constraint_satisfied"] = False
+            stats["failed"] += 1
             continue
 
         p0 = _endpoint_xy(scene, fr, vocab)
         p1 = _endpoint_xy(scene, to, vocab)
 
+        from_node = str(fr.get("node") or "")
+        to_node = str(to.get("node") or "")
+        endpoint_boxes = [bb for nid, bb in all_bboxes.items() if nid in (from_node, to_node)]
+        obstacles = [bb for nid, bb in all_bboxes.items() if nid not in (from_node, to_node)]
+
         if m == "straight":
             net["path"] = [_point_to_dict(p0), _point_to_dict(p1)]
+            net["route_status"] = "degraded"
+            net["route_constraint_satisfied"] = False
+            stats["degraded"] += 1
             continue
 
         p0_out = _endpoint_out_point(scene, fr, p0, vocab, lead_len)
         p1_out = _endpoint_out_point(scene, to, p1, vocab, lead_len)
+
+        chosen_path: List[Dict[str, float]]
+        if avoid_mode:
+            ortho = route_net_orthogonal_avoid_obstacles(
+                p0,
+                p1,
+                p0_out=p0_out,
+                p1_out=p1_out,
+                obstacles=obstacles,
+                resolution=resolution,
+                grid_step=route_grid,
+            )
+            if ortho is not None:
+                pts = [(float(it["x"]), float(it["y"])) for it in ortho]
+                endpoint_ok = not _path_hits_any_bbox(pts[1:-1], endpoint_boxes)
+                obstacle_ok = not _path_hits_any_bbox(pts, obstacles)
+                if endpoint_ok and obstacle_ok:
+                    net["path"] = ortho
+                    net["route_status"] = "success"
+                    net["route_constraint_satisfied"] = True
+                    stats["success"] += 1
+                    continue
+
+            fallback = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode="hv")
+            fpts = [(float(it["x"]), float(it["y"])) for it in fallback]
+            hard_ok = (not _path_hits_any_bbox(fpts[1:-1], endpoint_boxes)) and (not _path_hits_any_bbox(fpts, obstacles))
+            net["path"] = fallback
+            net["route_status"] = "degraded" if fallback else "failed"
+            net["route_constraint_satisfied"] = bool(hard_ok)
+            net["route_mode_used"] = "fallback_two_seg"
+            if hard_ok:
+                stats["success"] += 1
+                net["route_status"] = "success"
+            else:
+                stats["degraded"] += 1
+            continue
 
         if bm == "auto":
             hv_path = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode="hv")
             vh_path = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode="vh")
             hv_points = [(float(it["x"]), float(it["y"])) for it in hv_path]
             vh_points = [(float(it["x"]), float(it["y"])) for it in vh_path]
-
-            from_node = str(fr.get("node") or "")
-            to_node = str(to.get("node") or "")
-            endpoint_boxes = [bb for nid, bb in all_bboxes.items() if nid in (from_node, to_node)]
-            obstacles = [bb for nid, bb in all_bboxes.items() if nid not in (from_node, to_node)]
 
             hv_penalty = int(_path_hits_any_bbox(hv_points[1:-1], endpoint_boxes)) + int(_path_hits_any_bbox(hv_points, obstacles))
             vh_penalty = int(_path_hits_any_bbox(vh_points[1:-1], endpoint_boxes)) + int(_path_hits_any_bbox(vh_points, obstacles))
@@ -702,9 +868,19 @@ def route_all_nets(
         else:
             choice = bm
 
-        net["path"] = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode=choice)
+        chosen_path = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode=choice)
+        cpts = [(float(it["x"]), float(it["y"])) for it in chosen_path]
+        hard_ok = (not _path_hits_any_bbox(cpts[1:-1], endpoint_boxes)) and (not _path_hits_any_bbox(cpts, obstacles))
+        net["path"] = chosen_path
+        net["route_constraint_satisfied"] = bool(hard_ok)
+        if hard_ok:
+            net["route_status"] = "success"
+            stats["success"] += 1
+        else:
+            net["route_status"] = "degraded"
+            stats["degraded"] += 1
 
-    return scene
+    return scene, stats
 
 
 def shuffle_scene(
@@ -743,7 +919,7 @@ def shuffle_scene(
     max_tries_cap = max(120, min(5000, 120 + 25 * max(1, node_count)))
     max_tries = max(10, min(requested_max_tries, max_tries_cap))
     placement = str(p.get("placement", p.get("placement_mode", "random_nonoverlap")) or "random_nonoverlap")
-    route_mode = str(p.get("route_mode", p.get("route", "two_seg")) or "two_seg")
+    route_mode = str(p.get("route_mode", p.get("route", "avoid_obstacles")) or "avoid_obstacles")
     bend_mode = str(p.get("bend_mode", "auto"))
 
     # Resolution can be overridden via params, else scene.meta.resolution.
@@ -778,12 +954,21 @@ def shuffle_scene(
 
     t_route_start = time.perf_counter()
     if return_paths:
-        route_all_nets(scene_out, vocab=vocab, mode=route_mode, bend_mode=bend_mode, rng=rng)
+        _, route_stats = route_all_nets(
+            scene_out,
+            vocab=vocab,
+            mode=route_mode,
+            bend_mode=bend_mode,
+            rng=rng,
+            route_grid=_safe_float(p.get("route_grid", 12.0), 12.0),
+        )
     else:
         # Explicitly clear paths to keep output compact.
         for net in _iter_nets(scene_out):
             net["path"] = []
-    t_route_end = time.perf_counter()
+            net["route_status"] = "failed"
+            net["route_constraint_satisfied"] = False
+        route_stats = {"success": 0, "degraded": 0, "failed": int(len(list(_iter_nets(scene_out))))}
 
     # Optionally persist shuffle params into scene meta for reproducibility.
     meta_scene = scene_out.setdefault("meta", {})
@@ -813,17 +998,7 @@ def shuffle_scene(
         "num_nodes": int(len(list(_iter_nodes(scene_out)))),
         "num_nets": int(len(list(_iter_nets(scene_out)))),
         "params": p,
-        "placement_stats": {
-            **placement_stats,
-            "max_tries_requested": int(requested_max_tries),
-            "max_tries_effective": int(max_tries),
-            "max_tries_cap": int(max_tries_cap),
-        },
-        "timings_ms": {
-            "placement": float((t_place_end - t_place_start) * 1000.0),
-            "routing": float((t_route_end - t_route_start) * 1000.0),
-            "total": float((time.perf_counter() - t_shuffle_start) * 1000.0),
-        },
+        "route_stats": route_stats,
     }
 
     return scene_out, meta
