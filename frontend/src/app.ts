@@ -102,6 +102,7 @@ export async function bootstrapApp(): Promise<void> {
   const interactionStatusEl = byId<HTMLSpanElement>("interaction-layer-status");
   const statusShortEl = byId<HTMLDivElement>("status-short");
   const requestSummaryEl = byId<HTMLDivElement>("request-summary");
+  const shuffleModeStatusEl = byId<HTMLDivElement>("shuffle-mode-status");
 
   const circuitCtx = circuitCanvas.getContext("2d");
   const maskCtx = maskCanvas.getContext("2d");
@@ -189,6 +190,33 @@ export async function bootstrapApp(): Promise<void> {
     labelJsonEl.value = JSON.stringify(state.label, null, 2);
     labelSummaryEl.innerHTML = `<div>function: ${state.label.function}</div><div>occ_threshold: ${state.label.occ_threshold}</div><div>occlusion 条目: ${state.label.occlusion?.length || 0}</div>`;
   };
+
+  const updateShuffleModeStatus = (useBackend: boolean): void => {
+    shuffleModeStatusEl.textContent = useBackend
+      ? "Shuffle 模式：当前使用后端 shuffle"
+      : "Shuffle 模式：当前使用本地 shuffle";
+  };
+
+  const shuffleUseBackendEl = byId<HTMLInputElement>("shuffle-use-backend");
+  const loadShuffleBackendPreference = (): boolean => {
+    try {
+      return localStorage.getItem("cdt.shuffleUseBackend") === "true";
+    } catch {
+      return false;
+    }
+  };
+  shuffleUseBackendEl.checked = loadShuffleBackendPreference();
+  updateShuffleModeStatus(shuffleUseBackendEl.checked);
+  shuffleUseBackendEl.addEventListener("change", () => {
+    const enabled = shuffleUseBackendEl.checked;
+    try {
+      localStorage.setItem("cdt.shuffleUseBackend", String(enabled));
+    } catch {
+      // ignore
+    }
+    updateShuffleModeStatus(enabled);
+    log(enabled ? "已开启后端 Shuffle 模式" : "已切换为本地 Shuffle 模式");
+  });
 
   bindPalette(engine, render, log, vocab);
   bindMaskPaint(uiCanvas, maskLayer, () => state.mode === "mask", render);
@@ -402,7 +430,17 @@ export async function bootstrapApp(): Promise<void> {
     })();
     const margin = toNum(byId<HTMLInputElement>("shuffle-margin").value, 20);
 
-    const doShuffle = async (): Promise<void> => {
+    engine.shuffleNodePositions(parsedSeed, margin);
+    syncScene();
+    render();
+    log("已先执行本地 shuffle 并刷新画布");
+
+    if (!shuffleUseBackendEl.checked) {
+      log("当前为本地 shuffle 模式，已跳过后端请求");
+      return;
+    }
+
+    const doBackendShuffle = async (): Promise<void> => {
       const params = {
         seed: parsedSeed,
         placement: byId<HTMLSelectElement>("shuffle-placement").value,
@@ -414,37 +452,28 @@ export async function bootstrapApp(): Promise<void> {
       const returnPaths = byId<HTMLSelectElement>("shuffle-return-paths").value === "true";
       const startedAt = performance.now();
       const { scene_shuffled } = await getApi().shuffleScene(syncScene(), params, returnPaths);
-      engine.loadScene(scene_shuffled);
-      syncScene();
-      render();
       log(`Shuffle 请求耗时 ${(performance.now() - startedAt).toFixed(0)}ms`);
-      log("Shuffle 完成并已刷新画布");
+      if (scene_shuffled) {
+        engine.loadScene(scene_shuffled);
+        syncScene();
+        render();
+        log("后端 Shuffle 已返回 scene_shuffled，已覆盖前端结果");
+      } else {
+        log("后端未返回 scene_shuffled，已使用前端结果");
+      }
     };
 
     try {
-      await doShuffle();
+      await doBackendShuffle();
     } catch (err) {
       log(`⚠️ ${userFacingError(err, "后端 Shuffle 失败")}`);
       if (isTimeoutError(err)) {
-        const timeoutMs = readApiTimeoutMs();
-        const retry = window.confirm(
-          `后端 Shuffle 请求超时（${Math.round(timeoutMs / 1000)}s）。\n建议检查后端负载或提高超时。\n是否立即重试一次？`,
-        );
-        if (retry) {
-          try {
-            await doShuffle();
-          } catch (retryErr) {
-            logError(retryErr, "重试 Shuffle 仍失败");
-          }
-        }
+        log("后端 Shuffle 超时，已保留前端结果，不阻塞后续交互");
         return;
       }
 
       if (err instanceof ApiError) {
-        engine.shuffleNodePositions(parsedSeed, margin);
-        syncScene();
-        render();
-        log("后端返回业务错误，已使用本地 shuffle（保拓扑）");
+        log("后端返回业务错误，已使用前端结果");
       }
     }
   });
