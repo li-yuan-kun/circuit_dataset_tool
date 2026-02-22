@@ -154,18 +154,28 @@ export class CanvasEngine {
     const n = this.scene.nodes.find((x) => x.id === nodeId);
     if (!n) return;
     n.pos = { ...pos };
+    this.refreshNetPathsForNode(nodeId);
   }
 
   rotateNode(nodeId: string, rot: number): void {
     const n = this.scene.nodes.find((x) => x.id === nodeId);
     if (!n) return;
     n.rot = rot;
+    this.refreshNetPathsForNode(nodeId);
   }
 
   scaleNode(nodeId: string, scale: number): void {
     const n = this.scene.nodes.find((x) => x.id === nodeId);
     if (!n) return;
     n.scale = Math.max(0.05, Number(scale));
+    this.refreshNetPathsForNode(nodeId);
+  }
+
+  private refreshNetPathsForNode(nodeId: string): void {
+    for (const net of this.scene.nets) {
+      if (net.from.node !== nodeId && net.to.node !== nodeId) continue;
+      net.path = this.computeDefaultNetPath(net);
+    }
   }
 
   connectPins(from: Endpoint, to: Endpoint): string {
