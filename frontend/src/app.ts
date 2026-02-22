@@ -125,6 +125,14 @@ export async function bootstrapApp(): Promise<void> {
     maskLayer.drawOverlay(maskCtx, 0.45);
   };
 
+  const syncInteractionCanvas = (): void => {
+    const isCircuitMode = state.mode === "circuit";
+    uiCanvas.style.pointerEvents = isCircuitMode ? "auto" : "none";
+    uiCanvas.style.cursor = isCircuitMode ? "crosshair" : "default";
+    maskCanvas.style.pointerEvents = isCircuitMode ? "none" : "auto";
+    maskCanvas.style.cursor = isCircuitMode ? "default" : "crosshair";
+  };
+
   const refreshLabelUi = (): void => {
     if (!state.label) {
       labelJsonEl.value = "";
@@ -404,13 +412,16 @@ export async function bootstrapApp(): Promise<void> {
 
   byId<HTMLButtonElement>("btn-mode-circuit").addEventListener("click", () => {
     state.mode = "circuit";
+    syncInteractionCanvas();
     log("已切换到电路编辑模式");
   });
   byId<HTMLButtonElement>("btn-mode-mask").addEventListener("click", () => {
     state.mode = "mask";
+    syncInteractionCanvas();
     log("已切换到 Mask 编辑模式");
   });
 
+  syncInteractionCanvas();
   syncScene();
   refreshLabelUi();
   render();
