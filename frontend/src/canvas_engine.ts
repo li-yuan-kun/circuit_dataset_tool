@@ -71,6 +71,8 @@ function rotateXY(x: number, y: number, rad: number): { x: number; y: number } {
   return { x: x * c - y * s, y: x * s + y * c };
 }
 
+type BBox = { x0: number; y0: number; x1: number; y1: number };
+
 function makeSeededRandom(seed: number): () => number {
   let s = seed >>> 0;
   return () => {
@@ -358,11 +360,114 @@ export class CanvasEngine {
     return { x: n.pos.x + r.x, y: n.pos.y + r.y };
   }
 
+  private nodeBBox(nodeId: string): BBox | null {
+    const n = this.scene.nodes.find((x) => x.id === nodeId);
+    if (!n) return null;
+    const { w, h } = safeSizeFromVocab(this.vocab, n.type);
+    const s = Number(n.scale ?? 1);
+    const bw = w * s;
+    const bh = h * s;
+    return { x0: n.pos.x - bw / 2, y0: n.pos.y - bh / 2, x1: n.pos.x + bw / 2, y1: n.pos.y + bh / 2 };
+  }
+
+  private endpointOutPoint(ep: Endpoint, p: Point, leadLen: number): Point {
+    const node = this.scene.nodes.find((x) => x.id === ep.node);
+    if (!node) return { ...p };
+    const pins = iterPinsFromVocab(this.vocab, node.type);
+    const pin = pins.find((pp) => pp.name === ep.pin);
+
+    let vx = p.x - node.pos.x;
+    let vy = p.y - node.pos.y;
+    if (pin) {
+      const rad = rotToRad(node.rot);
+      const s = Number(node.scale ?? 1);
+      const local = rotateXY(pin.x * s, pin.y * s, rad);
+      vx = local.x;
+      vy = local.y;
+    }
+    const norm = Math.hypot(vx, vy);
+    if (norm < 1e-3) return { x: p.x + leadLen, y: p.y };
+    return { x: p.x + (vx / norm) * leadLen, y: p.y + (vy / norm) * leadLen };
+  }
+
+  private segmentIntersectsBBox(a: Point, b: Point, bb: BBox): boolean {
+    const eps = 0.001;
+    const x0 = bb.x0 - eps;
+    const y0 = bb.y0 - eps;
+    const x1 = bb.x1 + eps;
+    const y1 = bb.y1 + eps;
+
+    if (Math.abs(a.y - b.y) < eps) {
+      const y = a.y;
+      if (y < y0 || y > y1) return false;
+      const sx0 = Math.min(a.x, b.x);
+      const sx1 = Math.max(a.x, b.x);
+      return !(sx1 < x0 || sx0 > x1);
+    }
+    if (Math.abs(a.x - b.x) < eps) {
+      const x = a.x;
+      if (x < x0 || x > x1) return false;
+      const sy0 = Math.min(a.y, b.y);
+      const sy1 = Math.max(a.y, b.y);
+      return !(sy1 < y0 || sy0 > y1);
+    }
+    return false;
+  }
+
+  private pathIntersectsBBoxes(path: Point[], bboxes: BBox[]): boolean {
+    for (let i = 0; i < path.length - 1; i++) {
+      for (const bb of bboxes) {
+        if (this.segmentIntersectsBBox(path[i], path[i + 1], bb)) return true;
+      }
+    }
+    return false;
+  }
+
+  private reroutePolylineAvoidObstacles(path: Point[], net: Net): Point[] {
+    const obstacles = this.scene.nodes
+      .filter((n) => n.id !== net.from.node && n.id !== net.to.node)
+      .map((n) => this.nodeBBox(n.id))
+      .filter((bb): bb is BBox => !!bb);
+
+    const tryPaths: Point[][] = [path];
+    if (path.length >= 5) {
+      const p0 = path[0];
+      const p0Out = path[1];
+      const p1In = path[path.length - 2];
+      const p1 = path[path.length - 1];
+      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1In.y }, { ...p1In }, { ...p1 }]);
+
+      const axisOffset = 22;
+      const midX = (p0Out.x + p1In.x) / 2;
+      const midY = (p0Out.y + p1In.y) / 2;
+      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: midX + axisOffset, y: p0Out.y }, { x: midX + axisOffset, y: p1In.y }, { ...p1In }, { ...p1 }]);
+      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: midY - axisOffset }, { x: p1In.x, y: midY - axisOffset }, { ...p1In }, { ...p1 }]);
+    }
+
+    for (const candidate of tryPaths) {
+      if (!this.pathIntersectsBBoxes(candidate, obstacles)) return candidate;
+    }
+    return path;
+  }
+
   private computeDefaultNetPath(net: Net): Point[] {
     const p0 = this.endpointXY(net.from);
     const p1 = this.endpointXY(net.to);
-    // 简单两段折线：hv
-    return [{ ...p0 }, { x: p1.x, y: p0.y }, { ...p1 }];
+    const leadLen = 12;
+    const p0Out = this.endpointOutPoint(net.from, p0, leadLen);
+    const p1Out = this.endpointOutPoint(net.to, p1, leadLen);
+
+    const hv = [{ ...p0 }, { ...p0Out }, { x: p1Out.x, y: p0Out.y }, { ...p1Out }, { ...p1 }];
+    const vh = [{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1Out.y }, { ...p1Out }, { ...p1 }];
+
+    const fromBox = this.nodeBBox(net.from.node);
+    const toBox = this.nodeBBox(net.to.node);
+    const endpointBoxes = [fromBox, toBox].filter((bb): bb is BBox => !!bb);
+
+    const hvPenalty = this.pathIntersectsBBoxes(hv.slice(1, hv.length - 1), endpointBoxes) ? 1 : 0;
+    const vhPenalty = this.pathIntersectsBBoxes(vh.slice(1, vh.length - 1), endpointBoxes) ? 1 : 0;
+    const base = hvPenalty <= vhPenalty ? hv : vh;
+    return this.reroutePolylineAvoidObstacles(base, net);
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -383,12 +488,30 @@ export class CanvasEngine {
       const path = (e.path && e.path.length >= 2) ? e.path : this.computeDefaultNetPath(e);
 
       ctx.save();
-      ctx.lineWidth = isSel ? 3 : 2;
-      ctx.strokeStyle = isSel ? "#1e88e5" : "#666";
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.lineWidth = isSel ? 6 : 5;
+      ctx.strokeStyle = "#ffffff";
       ctx.beginPath();
       ctx.moveTo(path[0].x, path[0].y);
       for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
       ctx.stroke();
+
+      ctx.lineWidth = isSel ? 3 : 2;
+      ctx.strokeStyle = isSel ? "#1e88e5" : "#444";
+      ctx.stroke();
+
+      const pStart = path[0];
+      const pEnd = path[path.length - 1];
+      for (const p of [pStart, pEnd]) {
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = isSel ? "#1e88e5" : "#222";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -425,8 +548,13 @@ export class CanvasEngine {
       if (pins.length) {
         ctx.fillStyle = "#111";
         for (const p of pins) {
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(p.x * s, p.y * s, 3, 0, Math.PI * 2);
+          ctx.arc(p.x * s, p.y * s, 5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(p.x * s, p.y * s, 3.5, 0, Math.PI * 2);
           ctx.fill();
         }
       }

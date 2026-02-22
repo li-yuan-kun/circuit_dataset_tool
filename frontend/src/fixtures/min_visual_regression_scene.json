@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "scene_version": "0.3",
+    "tool_version": "0.3",
+    "vocab_version": null,
+    "seed": 20260222,
+    "resolution": { "w": 640, "h": 360 },
+    "params": {
+      "route_mode": "two_seg",
+      "bend_mode": "auto"
+    },
+    "timestamp": "2026-02-22T00:00:00.000Z"
+  },
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "rect_left",
+      "pos": { "x": 230, "y": 180 },
+      "rot": 0,
+      "scale": 1
+    },
+    {
+      "id": "n2",
+      "type": "rect_right",
+      "pos": { "x": 390, "y": 180 },
+      "rot": 0,
+      "scale": 1
+    }
+  ],
+  "nets": [
+    {
+      "id": "e1",
+      "from": { "node": "n1", "pin": "p_right" },
+      "to": { "node": "n2", "pin": "p_left" },
+      "path": []
+    }
+  ]
+}

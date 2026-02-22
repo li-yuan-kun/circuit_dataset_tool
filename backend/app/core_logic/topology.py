@@ -453,26 +453,99 @@ def place_nodes_random_nonoverlap(
     return nodes
 
 
+def _point_to_dict(p: Tuple[float, float]) -> Dict[str, float]:
+    return {"x": float(p[0]), "y": float(p[1])}
+
+
+def _node_map(scene: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for n in _iter_nodes(scene):
+        nid = str(n.get("id") or "")
+        if nid:
+            out[nid] = n
+    return out
+
+
+def _endpoint_out_point(
+    scene: Dict[str, Any], ep: Dict[str, Any], p: Tuple[float, float], vocab: Dict[str, Any], lead_len: float
+) -> Tuple[float, float]:
+    node_id = str(ep.get("node") or "")
+    node = _node_map(scene).get(node_id)
+    if not isinstance(node, dict):
+        return (float(p[0]), float(p[1]))
+
+    pos = node.get("pos") or {}
+    cx = _safe_float(pos.get("x", 0.0), 0.0)
+    cy = _safe_float(pos.get("y", 0.0), 0.0)
+
+    vx = float(p[0]) - cx
+    vy = float(p[1]) - cy
+    norm = math.hypot(vx, vy)
+    if norm <= 1e-6:
+        return (float(p[0]) + float(lead_len), float(p[1]))
+
+    k = float(lead_len) / norm
+    return (float(p[0]) + vx * k, float(p[1]) + vy * k)
+
+
+def _segment_intersects_bbox(a: Tuple[float, float], b: Tuple[float, float], bb: Tuple[float, float, float, float]) -> bool:
+    x0, y0 = float(a[0]), float(a[1])
+    x1, y1 = float(b[0]), float(b[1])
+    bx0, by0, bx1, by1 = bb
+    eps = 1e-6
+
+    if abs(y0 - y1) <= eps:  # horizontal
+        y = y0
+        if y < by0 - eps or y > by1 + eps:
+            return False
+        sx0, sx1 = min(x0, x1), max(x0, x1)
+        return not (sx1 < bx0 - eps or sx0 > bx1 + eps)
+
+    if abs(x0 - x1) <= eps:  # vertical
+        x = x0
+        if x < bx0 - eps or x > bx1 + eps:
+            return False
+        sy0, sy1 = min(y0, y1), max(y0, y1)
+        return not (sy1 < by0 - eps or sy0 > by1 + eps)
+
+    return False
+
+
+def _path_hits_any_bbox(path: Sequence[Tuple[float, float]], bboxes: Sequence[Tuple[float, float, float, float]]) -> bool:
+    for i in range(len(path) - 1):
+        a, b = path[i], path[i + 1]
+        for bb in bboxes:
+            if _segment_intersects_bbox(a, b, bb):
+                return True
+    return False
+
+
 def route_net_two_seg(
     p0: Tuple[float, float],
     p1: Tuple[float, float],
+    *,
+    p0_out: Optional[Tuple[float, float]] = None,
+    p1_out: Optional[Tuple[float, float]] = None,
     bend_mode: str = "hv",
 ) -> List[Dict[str, float]]:
-    """Return a 3-point polyline path: start -> bend -> end."""
+    """Return a polyline path: p0 -> p0_out -> trunk -> p1_out -> p1."""
 
     x0, y0 = float(p0[0]), float(p0[1])
     x1, y1 = float(p1[0]), float(p1[1])
+
+    q0 = (x0, y0) if p0_out is None else (float(p0_out[0]), float(p0_out[1]))
+    q1 = (x1, y1) if p1_out is None else (float(p1_out[0]), float(p1_out[1]))
 
     bm = (bend_mode or "hv").strip().lower()
     if bm not in ("hv", "vh"):
         bm = "hv"
 
     if bm == "hv":
-        mid = (x1, y0)
+        mid = (q1[0], q0[1])
     else:
-        mid = (x0, y1)
+        mid = (q0[0], q1[1])
 
-    return [{"x": x0, "y": y0}, {"x": float(mid[0]), "y": float(mid[1])}, {"x": x1, "y": y1}]
+    return [_point_to_dict((x0, y0)), _point_to_dict(q0), _point_to_dict(mid), _point_to_dict(q1), _point_to_dict((x1, y1))]
 
 
 def route_all_nets(
@@ -495,6 +568,12 @@ def route_all_nets(
 
     m = (mode or "two_seg").strip().lower()
     bm = (bend_mode or "hv").strip().lower()
+    lead_len = 12.0
+    node_map = _node_map(scene)
+
+    all_bboxes: Dict[str, Tuple[float, float, float, float]] = {}
+    for node_id, node in node_map.items():
+        all_bboxes[node_id] = _node_bbox(node, vocab)
 
     for net in _iter_nets(scene):
         fr = net.get("from") or net.get("from_")
@@ -506,20 +585,34 @@ def route_all_nets(
         p1 = _endpoint_xy(scene, to, vocab)
 
         if m == "straight":
-            net["path"] = [{"x": float(p0[0]), "y": float(p0[1])}, {"x": float(p1[0]), "y": float(p1[1])}]
+            net["path"] = [_point_to_dict(p0), _point_to_dict(p1)]
             continue
 
-        # two-segment
+        p0_out = _endpoint_out_point(scene, fr, p0, vocab, lead_len)
+        p1_out = _endpoint_out_point(scene, to, p1, vocab, lead_len)
+
         if bm == "auto":
-            # Prefer deterministic selection if rng provided.
-            if rng is None:
-                choice = "hv"
-            else:
+            hv_path = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode="hv")
+            vh_path = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode="vh")
+            hv_points = [(float(it["x"]), float(it["y"])) for it in hv_path]
+            vh_points = [(float(it["x"]), float(it["y"])) for it in vh_path]
+
+            from_node = str(fr.get("node") or "")
+            to_node = str(to.get("node") or "")
+            endpoint_boxes = [bb for nid, bb in all_bboxes.items() if nid in (from_node, to_node)]
+            obstacles = [bb for nid, bb in all_bboxes.items() if nid not in (from_node, to_node)]
+
+            hv_penalty = int(_path_hits_any_bbox(hv_points[1:-1], endpoint_boxes)) + int(_path_hits_any_bbox(hv_points, obstacles))
+            vh_penalty = int(_path_hits_any_bbox(vh_points[1:-1], endpoint_boxes)) + int(_path_hits_any_bbox(vh_points, obstacles))
+
+            if hv_penalty == vh_penalty and rng is not None:
                 choice = "hv" if bool(rng.integers(0, 2)) else "vh"
+            else:
+                choice = "hv" if hv_penalty <= vh_penalty else "vh"
         else:
             choice = bm
 
-        net["path"] = route_net_two_seg(p0, p1, bend_mode=choice)
+        net["path"] = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode=choice)
 
     return scene
 
