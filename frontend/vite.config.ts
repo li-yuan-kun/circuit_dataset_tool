@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import path from "node:path";
+import fs from "node:fs/promises";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
@@ -21,6 +22,9 @@ export default defineConfig(({ mode }) => {
     server: {
       port: Number(env.VITE_DEV_PORT || 5173),
       strictPort: true,
+      fs: {
+        allow: [path.resolve(__dirname, "..")],
+      },
       proxy: {
         // 统一代理 /api/* -> 后端
         "/api": {
@@ -41,5 +45,34 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       sourcemap: true,
     },
+    plugins: [
+      {
+        name: "serve-shared-vocab",
+        configureServer(server) {
+          server.middlewares.use(async (req, res, next) => {
+            if (req.url !== "/shared/vocab.json") {
+              next();
+              return;
+            }
+            try {
+              const content = await fs.readFile(path.resolve(__dirname, "../shared/vocab.json"), "utf8");
+              res.setHeader("Content-Type", "application/json; charset=utf-8");
+              res.end(content);
+            } catch (err) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+            }
+          });
+        },
+        async generateBundle() {
+          const source = await fs.readFile(path.resolve(__dirname, "../shared/vocab.json"), "utf8");
+          this.emitFile({
+            type: "asset",
+            fileName: "shared/vocab.json",
+            source,
+          });
+        },
+      },
+    ],
   };
 });
