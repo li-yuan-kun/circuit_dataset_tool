@@ -519,6 +519,8 @@ uvicorn backend.app.main:app --reload
   如果 `frontend/package.json` 不存在，说明前端构建配置尚未补齐，`npm install` / `npm run dev` 会失败。请先补齐前端脚手架与入口文件。
 - **Node 版本不满足要求**  
   本项目前端建议 Node.js **18+**。可用 `node -v` 检查；版本过低时请升级（推荐使用 nvm/fnm 管理多版本）。
+- **`signal is aborted without reason`**  
+  这通常表示前端主动中止请求（例如超时到期或用户取消），并不必然代表 mask 无效。优先检查前端超时设置、是否重复触发请求，再排查 mask 内容。
 
 ### Q1：`VOCAB_MISMATCH` / `footprint template not found`
 - 请确认 `shared/vocab.json` 中的 `type` 与 `shared/footprints/` 下模板命名一致，并且后端配置指向正确路径。

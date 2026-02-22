@@ -1,4 +1,4 @@
-import { ApiClient } from "./backend_client";
+import { ApiClient, ApiError } from "./backend_client";
 import { CanvasEngine } from "./canvas_engine";
 import { MaskLayer } from "./make_layer";
 import type { Label, Scene } from "./modules/types";
@@ -74,6 +74,8 @@ export async function bootstrapApp(): Promise<void> {
   const uiCanvas = byId<HTMLCanvasElement>("ui-canvas");
   const maskCanvas = byId<HTMLCanvasElement>("mask-canvas");
   const interactionStatusEl = byId<HTMLSpanElement>("interaction-layer-status");
+  const statusShortEl = byId<HTMLDivElement>("status-short");
+  const requestSummaryEl = byId<HTMLDivElement>("request-summary");
 
   const circuitCtx = circuitCanvas.getContext("2d");
   const maskCtx = maskCanvas.getContext("2d");
@@ -82,6 +84,24 @@ export async function bootstrapApp(): Promise<void> {
   const log = (msg: string): void => {
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
     statusLog.textContent = `${line}\n${statusLog.textContent || ""}`;
+  };
+
+  const updateRequestSummary = (endpoint: string, elapsedMs: number, status: string): void => {
+    const summary = `最近请求：${endpoint} | ${Math.round(elapsedMs)}ms | ${status}`;
+    requestSummaryEl.textContent = summary;
+    statusShortEl.textContent = summary;
+  };
+
+  const isTimeoutOrAbortError = (err: unknown): boolean => {
+    if (!(err instanceof Error)) return false;
+    const msg = err.message.toLowerCase();
+    return (
+      err.name === "AbortError" ||
+      msg.includes("aborted") ||
+      msg.includes("abort") ||
+      msg.includes("timeout") ||
+      msg.includes("signal is aborted without reason")
+    );
   };
 
   const resolution = { w: circuitCanvas.width, h: circuitCanvas.height };
@@ -315,6 +335,8 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   byId<HTMLButtonElement>("btn-compute-label").addEventListener("click", async () => {
+    const endpoint = "/label/compute";
+    const startedAt = performance.now();
     try {
       const functionValue = byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value;
       const occThreshold = toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9);
@@ -322,9 +344,24 @@ export async function bootstrapApp(): Promise<void> {
       const { label } = await getApi().computeLabel(syncScene(), maskBlob, occThreshold, functionValue);
       state.label = label;
       refreshLabelUi();
+      updateRequestSummary(endpoint, performance.now() - startedAt, "HTTP 200");
       log("Label 计算成功");
     } catch (err) {
-      logError(err, "计算 Label 失败，请确认已生成有效 Mask");
+      const elapsed = performance.now() - startedAt;
+      if (isTimeoutOrAbortError(err)) {
+        updateRequestSummary(endpoint, elapsed, "TIMEOUT/ABORT");
+        log("❌ 计算 Label 超时或请求被取消，请延长超时或降低分辨率/复杂度后重试");
+      } else if (err instanceof ApiError && err.code === "MASK_DECODE_ERROR") {
+        updateRequestSummary(endpoint, elapsed, `HTTP ${err.status} / ${err.code}`);
+        log("❌ 计算 Label 失败：请检查 mask 尺寸是否与 scene.meta.resolution 完全一致");
+      } else if (err instanceof ApiError) {
+        updateRequestSummary(endpoint, elapsed, `HTTP ${err.status} / ${err.code}`);
+        log(`❌ 计算 Label 失败：${err.code} - ${err.message}`);
+      } else {
+        updateRequestSummary(endpoint, elapsed, "UNKNOWN_ERROR");
+        logError(err, "计算 Label 失败");
+      }
+      console.error(err);
     }
   });
 
