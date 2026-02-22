@@ -16,6 +16,19 @@ type AppState = {
   maskBlob: Blob | null;
 };
 
+const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
+
+function normalizeAndValidateBaseUrl(raw: string): { valid: boolean; normalized: string } {
+  const value = raw.trim();
+  const withoutTrailingSlash = value.replace(/\/+$/, "");
+  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(withoutTrailingSlash);
+  const validRelative = withoutTrailingSlash === "/api/v1";
+  return {
+    valid: validAbsolute || validRelative,
+    normalized: withoutTrailingSlash,
+  };
+}
+
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`缺少 DOM 元素: #${id}`);
@@ -122,6 +135,8 @@ export async function bootstrapApp(): Promise<void> {
     statusShortEl.textContent = summary;
   };
 
+  let relativeBaseUrlHintLogged = false;
+
   const isTimeoutOrAbortError = (err: unknown): boolean => {
     if (!(err instanceof Error)) return false;
     const msg = err.message.toLowerCase();
@@ -155,7 +170,19 @@ export async function bootstrapApp(): Promise<void> {
 
   const getApi = (): ApiClient => {
     const baseUrlEl = byId<HTMLInputElement>("api-base-url");
-    const baseUrl = (baseUrlEl.value || "").trim();
+    const checked = normalizeAndValidateBaseUrl(baseUrlEl.value || "");
+    let baseUrl = checked.normalized;
+    if (!checked.valid) {
+      log(`⚠️ 后端地址不合法：${baseUrlEl.value}。已回退默认值 ${DEFAULT_API_BASE_URL}`);
+      baseUrl = DEFAULT_API_BASE_URL;
+    }
+    baseUrlEl.value = baseUrl;
+
+    if (baseUrl.startsWith("/api/v1") && !relativeBaseUrlHintLogged) {
+      log("ℹ️ 当前 baseUrl 为相对路径（/api/v1），请求依赖前端代理/同源反代。");
+      relativeBaseUrlHintLogged = true;
+    }
+
     const timeoutMs = readApiTimeoutMs();
     try {
       localStorage.setItem("cdt.apiBaseUrl", baseUrl);
@@ -353,14 +380,39 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   byId<HTMLButtonElement>("btn-health").addEventListener("click", async () => {
+    const baseUrlEl = byId<HTMLInputElement>("api-base-url");
+    const checked = normalizeAndValidateBaseUrl(baseUrlEl.value);
+    let apiBase = checked.normalized;
+    if (!checked.valid) {
+      log(`⚠️ 后端地址不合法：${baseUrlEl.value}。已回退默认值 ${DEFAULT_API_BASE_URL}`);
+      apiBase = DEFAULT_API_BASE_URL;
+      baseUrlEl.value = apiBase;
+    }
+    if (apiBase.startsWith("/api/v1")) {
+      log("ℹ️ 当前 baseUrl 为相对路径（/api/v1），请求依赖前端代理/同源反代。");
+    }
     try {
-      const apiBase = byId<HTMLInputElement>("api-base-url").value.trim().replace(/\/$/, "");
       const resp = await fetch(`${apiBase}/healthz`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       log("Health 检查成功");
     } catch (err) {
+      log(`ℹ️ Health 失败时使用的 baseUrl: ${apiBase}`);
       logError(err, "Health 检查失败");
     }
+  });
+
+  bindOptionalClick("btn-reset-backend", () => {
+    const baseUrlEl = byId<HTMLInputElement>("api-base-url");
+    const timeoutEl = byId<HTMLInputElement>("api-timeout-ms");
+    baseUrlEl.value = DEFAULT_API_BASE_URL;
+    timeoutEl.value = "30000";
+    try {
+      localStorage.removeItem("cdt.apiBaseUrl");
+      localStorage.removeItem("cdt.apiTimeoutMs");
+    } catch {
+      // ignore
+    }
+    log("已重置后端地址与超时配置（已清理本地存储 cdt.apiBaseUrl / cdt.apiTimeoutMs）");
   });
 
   byId<HTMLButtonElement>("btn-generate-mask").addEventListener("click", async () => {

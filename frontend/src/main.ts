@@ -1,11 +1,46 @@
 import "../styles/style.css";
 
+const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
+
+function normalizeAndValidateBaseUrl(raw: string): { valid: boolean; normalized: string } {
+  const value = raw.trim();
+  const withoutTrailingSlash = value.replace(/\/+$/, "");
+  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(withoutTrailingSlash);
+  const validRelative = withoutTrailingSlash === "/api/v1";
+  return {
+    valid: validAbsolute || validRelative,
+    normalized: withoutTrailingSlash,
+  };
+}
+
+function emitStartupNotice(message: string): void {
+  const statusLog = document.getElementById("status-log");
+  if (statusLog) {
+    const line = `[${new Date().toLocaleTimeString()}] ${message}`;
+    statusLog.textContent = `${line}\n${statusLog.textContent || ""}`;
+  }
+  const statusShort = document.getElementById("status-short");
+  if (statusShort) {
+    statusShort.textContent = message;
+  }
+}
+
 // 轻量初始化：恢复 Base URL 与 range 显示
 const baseUrlEl = document.getElementById("api-base-url") as HTMLInputElement | null;
 const timeoutEl = document.getElementById("api-timeout-ms") as HTMLInputElement | null;
 try {
   const saved = localStorage.getItem("cdt.apiBaseUrl");
-  if (saved && baseUrlEl) baseUrlEl.value = saved;
+  if (baseUrlEl) {
+    const initialValue = saved || baseUrlEl.value || DEFAULT_API_BASE_URL;
+    const checked = normalizeAndValidateBaseUrl(initialValue);
+    if (!checked.valid) {
+      baseUrlEl.value = DEFAULT_API_BASE_URL;
+      localStorage.removeItem("cdt.apiBaseUrl");
+      emitStartupNotice(`⚠️ 检测到无效后端地址：${initialValue}，已回退默认值 ${DEFAULT_API_BASE_URL}`);
+    } else {
+      baseUrlEl.value = checked.normalized;
+    }
+  }
   const savedTimeoutMs = localStorage.getItem("cdt.apiTimeoutMs");
   if (savedTimeoutMs && timeoutEl) timeoutEl.value = savedTimeoutMs;
 } catch {
