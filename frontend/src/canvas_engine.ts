@@ -192,6 +192,18 @@ export class CanvasEngine {
   setSelection(sel: { nodeId?: string; netId?: string } | null): void {
     this.sel = sel ? { ...sel } : null;
   }
+  getNodeById(nodeId: string): Node | null {
+    return this.scene.nodes.find((x) => x.id === nodeId) ?? null;
+  }
+
+  getSelection(): { nodeId?: string; netId?: string } | null {
+    return this.sel ? { ...this.sel } : null;
+  }
+
+  endpointPosition(ep: Endpoint): Point {
+    return this.endpointXY(ep);
+  }
+
 
   hitTestNode(p: Point): string | null {
     const nodes = this.scene.nodes;
