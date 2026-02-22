@@ -94,4 +94,8 @@ def topology_shuffle(req: ShuffleSceneRequest, request: Request) -> Dict[str, An
     except Exception:
         meta = {"note": "meta is not JSON-serializable"}
 
-    return {"scene_shuffled": scene_shuffled, "meta": meta}
+    return {
+        "scene_shuffled": scene_shuffled,
+        "meta": meta,
+        "placement_stats": (meta.get("placement_stats") if isinstance(meta, dict) else None),
+    }
