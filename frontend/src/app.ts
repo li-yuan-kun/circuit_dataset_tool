@@ -589,9 +589,10 @@ function bindCircuitInteractions(opts: {
     const targetPin = engine.hitTestPin(p);
     if (targetPin && !(targetPin.node === wiringFrom.node && targetPin.pin === wiringFrom.pin)) {
       try {
-        engine.connectPins(wiringFrom, targetPin);
+        const { replacedOld } = engine.connectPins(wiringFrom, targetPin);
         onChange();
-        log(`已连线：${wiringFrom.node}.${wiringFrom.pin} -> ${targetPin.node}.${targetPin.pin}`);
+        const replaceHint = replacedOld ? "（已替换旧连线）" : "";
+        log(`已连线：${wiringFrom.node}.${wiringFrom.pin} -> ${targetPin.node}.${targetPin.pin}${replaceHint}`);
       } catch {
         // ignore
       }
