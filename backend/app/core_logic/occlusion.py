@@ -33,6 +33,7 @@ import hashlib
 import json
 import logging
 import math
+import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
@@ -244,6 +245,31 @@ def _render_footprint_patch(
     return patch, (left, top)
 
 
+def _render_transformed_patch(comp_type: str, scale: float, rot_deg: float, footprint_db: Any) -> np.ndarray:
+    """Render a transformed footprint patch without placement."""
+    tmpl = _get_template(comp_type, footprint_db)
+    if tmpl is None:
+        raise KeyError(f"footprint template not found for type '{comp_type}'")
+
+    base = _canon_binary(tmpl)
+    h0, w0 = int(base.shape[0]), int(base.shape[1])
+
+    try:
+        from PIL import Image
+
+        img = Image.fromarray(base, mode="L")
+        if abs(scale - 1.0) > 1e-6:
+            w1 = max(1, int(round(w0 * scale)))
+            h1 = max(1, int(round(h0 * scale)))
+            img = img.resize((w1, h1), resample=Image.Resampling.NEAREST)
+        if abs(rot_deg) > 1e-6:
+            img = img.rotate(rot_deg, resample=Image.Resampling.NEAREST, expand=True)
+        patch = np.asarray(img, dtype=np.uint8)
+        return np.where(patch > 0, 255, 0).astype(np.uint8)
+    except Exception:
+        return base
+
+
 def _occ_ratio_from_patch(mask_bool: np.ndarray, patch: np.ndarray, left: int, top: int) -> float:
     """Compute occlusion ratio between a local footprint patch and global mask."""
 
@@ -313,31 +339,82 @@ def compute_occlusion(scene: Dict[str, Any], mask: np.ndarray, footprint_db: Any
             )
 
     out: List[Dict[str, Any]] = []
-    for node in _iter_nodes(scene):
+    nodes = list(_iter_nodes(scene))
+    if len(nodes) == 0:
+        return out
+
+    # Lightweight fast path: empty occlusion mask means all ratios are zero.
+    if not bool(mask_bool.any()):
+        for node in nodes:
+            out.append(
+                {
+                    "node_id": str(node.get("id") or ""),
+                    "type": str(node.get("type") or ""),
+                    "occ_ratio": 0.0,
+                }
+            )
+        return out
+
+    patch_cache: Dict[Tuple[str, float, float], np.ndarray] = {}
+    prepared: List[Tuple[str, str, np.ndarray, int, int]] = []
+    t_render_start = time.perf_counter()
+
+    for node in nodes:
         node_id = str(node.get("id") or "")
         comp_type = str(node.get("type") or "")
 
-        occ_ratio = 0.0
-        if comp_type:
-            try:
-                patch, (left, top) = _render_footprint_patch(node=node, comp_type=comp_type, footprint_db=footprint_db)
-                occ_ratio = _occ_ratio_from_patch(mask_bool, patch, left, top)
-            except KeyError:
-                # Missing footprint template: treat as not occluded, but log.
-                logger.warning("footprint_missing", extra={"node_id": node_id, "type": comp_type})
-                occ_ratio = 0.0
-            except Exception as e:
-                logger.warning(
-                    "occlusion_node_failed",
-                    extra={"node_id": node_id, "type": comp_type, "error": str(e)},
-                )
-                occ_ratio = 0.0
+        if not comp_type:
+            prepared.append((node_id, comp_type, np.zeros((1, 1), dtype=np.uint8), 0, 0))
+            continue
 
-        # Clamp to [0,1]
-        if not (0.0 <= occ_ratio <= 1.0) or math.isnan(occ_ratio):
-            occ_ratio = float(min(1.0, max(0.0, occ_ratio))) if not math.isnan(occ_ratio) else 0.0
+        try:
+            scale = _safe_float(node.get("scale", 1.0), 1.0)
+            if not (scale > 0.0):
+                scale = 1.0
+            rot_deg = _rot_to_deg(_safe_float(node.get("rot", 0.0), 0.0))
+            key = (comp_type, round(scale, 6), round(rot_deg, 4))
 
-        out.append({"node_id": node_id, "type": comp_type, "occ_ratio": float(occ_ratio)})
+            patch = patch_cache.get(key)
+            if patch is None:
+                patch = _render_transformed_patch(comp_type, scale, rot_deg, footprint_db)
+                patch_cache[key] = patch
+
+            pos = node.get("pos") or {}
+            cx = _safe_float(pos.get("x", 0.0), 0.0)
+            cy = _safe_float(pos.get("y", 0.0), 0.0)
+            ph, pw = int(patch.shape[0]), int(patch.shape[1])
+            left = int(round(cx - pw / 2.0))
+            top = int(round(cy - ph / 2.0))
+            prepared.append((node_id, comp_type, patch, left, top))
+        except KeyError:
+            logger.warning("footprint_missing", extra={"node_id": node_id, "type": comp_type})
+            prepared.append((node_id, comp_type, np.zeros((1, 1), dtype=np.uint8), 0, 0))
+        except Exception as e:
+            logger.warning("occlusion_node_failed", extra={"node_id": node_id, "type": comp_type, "error": str(e)})
+            prepared.append((node_id, comp_type, np.zeros((1, 1), dtype=np.uint8), 0, 0))
+
+    render_ms = (time.perf_counter() - t_render_start) * 1000.0
+
+    t_intersect_start = time.perf_counter()
+    chunk_size = 256 if len(prepared) >= 1000 else len(prepared)
+    for i in range(0, len(prepared), max(1, chunk_size)):
+        chunk = prepared[i : i + max(1, chunk_size)]
+        for node_id, comp_type, patch, left, top in chunk:
+            occ_ratio = _occ_ratio_from_patch(mask_bool, patch, left, top)
+            if not (0.0 <= occ_ratio <= 1.0) or math.isnan(occ_ratio):
+                occ_ratio = float(min(1.0, max(0.0, occ_ratio))) if not math.isnan(occ_ratio) else 0.0
+            out.append({"node_id": node_id, "type": comp_type, "occ_ratio": float(occ_ratio)})
+    intersect_ms = (time.perf_counter() - t_intersect_start) * 1000.0
+
+    logger.info(
+        "occlusion_compute_stats",
+        extra={
+            "nodes": len(nodes),
+            "cache_size": len(patch_cache),
+            "render_ms": round(render_ms, 3),
+            "intersect_ms": round(intersect_ms, 3),
+        },
+    )
 
     return out
 
@@ -402,8 +479,13 @@ def compute_label(
     func = (function or "").strip() or "UNKNOWN"
     thr = float(occ_threshold)
 
+    t_render_start = time.perf_counter()
     occ_items = compute_occlusion(scene=scene, mask=mask, footprint_db=footprint_db)
+    render_ms = (time.perf_counter() - t_render_start) * 1000.0
+
+    t_assemble_start = time.perf_counter()
     counts_all, counts_visible = compute_counts(scene=scene, occlusion_items=occ_items, occ_threshold=thr)
+    assemble_ms = (time.perf_counter() - t_assemble_start) * 1000.0
 
     # Optional audit hashes.
     meta: Dict[str, Any] = {}
@@ -416,7 +498,7 @@ def compute_label(
     except Exception:
         pass
 
-    return {
+    label_obj = {
         "label_version": "0.3",
         "counts_all": counts_all,
         "counts_visible": counts_visible,
@@ -425,3 +507,13 @@ def compute_label(
         "function": func,
         "meta": meta,
     }
+
+    logger.info(
+        "label_compute_stats",
+        extra={
+            "render_ms": round(render_ms, 3),
+            "assemble_ms": round(assemble_ms, 3),
+            "nodes": len(scene.get("nodes") or []),
+        },
+    )
+    return label_obj
