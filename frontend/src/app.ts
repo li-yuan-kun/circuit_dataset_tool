@@ -1,13 +1,16 @@
 import { ApiClient, ApiError } from "./backend_client";
 import { CanvasEngine } from "./canvas_engine";
 import { MaskLayer } from "./make_layer";
+import { computeLabelLocalApprox } from "./modules/label_local";
 import type { Label, Scene } from "./modules/types";
 import { exportCanvasPNG, makeLabelJson, makeSceneJson, suggestSampleId } from "./utils/export";
 
 type EditorMode = "circuit" | "mask";
+type LabelComputeMode = "frontend_fast" | "backend_precise";
 
 type AppState = {
   mode: EditorMode;
+  labelComputeMode: LabelComputeMode;
   scene: Scene;
   label: Label | null;
   maskBlob: Blob | null;
@@ -138,6 +141,7 @@ export async function bootstrapApp(): Promise<void> {
 
   const state: AppState = {
     mode: "circuit",
+    labelComputeMode: "frontend_fast",
     scene: engine.serializeScene(),
     label: null,
     maskBlob: null,
@@ -390,11 +394,32 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   byId<HTMLButtonElement>("btn-compute-label").addEventListener("click", async () => {
+    const selectedMode = byId<HTMLSelectElement>("label-compute-mode").value as LabelComputeMode;
+    state.labelComputeMode = selectedMode === "backend_precise" ? "backend_precise" : "frontend_fast";
+
     const endpoint = "/label/compute";
     const startedAt = performance.now();
+    const functionValue = byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value;
+    const occThreshold = toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9);
+    const computeLocal = (reason?: string): void => {
+      const label = computeLabelLocalApprox({
+        scene: syncScene(),
+        maskImageData: maskLayer.getMaskImageData(),
+        occThreshold,
+        functionName: functionValue,
+      });
+      state.label = label;
+      refreshLabelUi();
+      updateRequestSummary("frontend://label/compute-local", performance.now() - startedAt, "APPROX");
+      log(reason ? `⚠️ ${reason}，已使用前端近似结果` : "Label 计算成功（前端快速，近似结果）");
+    };
+
+    if (state.labelComputeMode === "frontend_fast") {
+      computeLocal();
+      return;
+    }
+
     try {
-      const functionValue = byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value;
-      const occThreshold = toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9);
       const maskBlob = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
       const startedAt = performance.now();
       const { label } = await getApi().computeLabel(syncScene(), maskBlob, occThreshold, functionValue);
@@ -404,6 +429,7 @@ export async function bootstrapApp(): Promise<void> {
       log("Label 计算成功");
     } catch (err) {
       const elapsed = performance.now() - startedAt;
+      computeLocal("后端精确计算失败");
       if (isTimeoutOrAbortError(err)) {
         updateRequestSummary(endpoint, elapsed, "TIMEOUT/ABORT");
         log("❌ 计算 Label 超时或请求被取消，请延长超时或降低分辨率/复杂度后重试");

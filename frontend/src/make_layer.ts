@@ -173,6 +173,10 @@ export class MaskLayer {
     ctx.restore();
   }
 
+  getMaskImageData(): ImageData {
+    return this.ctx.getImageData(0, 0, this.resolution.w, this.resolution.h);
+  }
+
   async exportMaskBinaryPNG(): Promise<Blob> {
     const W = this.resolution.w;
     const H = this.resolution.h;
