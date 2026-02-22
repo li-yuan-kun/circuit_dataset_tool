@@ -162,23 +162,33 @@ export class ApiClient {
     occThreshold = 0.9,
     func = "UNKNOWN"
   ): Promise<{ label: Label }> {
+    const binaryUrl = joinUrl(this.baseUrl, "/label/compute/binary");
+    const formData = new FormData();
+    formData.append("scene_json", JSON.stringify(scene));
+    formData.append("occ_threshold", String(occThreshold));
+    formData.append("function", func);
+    formData.append("mask_png", maskPngBlob, "mask.png");
+
+    const binaryResp = await this.fetchWithTimeout(binaryUrl, { method: "POST", body: formData });
+    if (binaryResp.ok) {
+      const json = await binaryResp.json();
+      return { label: (json.label ?? json) as Label };
+    }
+
+    // 新后端不可用时回退旧 JSON base64 接口。
+    if (![404, 405, 415, 422].includes(binaryResp.status)) {
+      throw parseError(binaryResp.status, await safeReadJson(binaryResp));
+    }
+
     const url = joinUrl(this.baseUrl, "/label/compute");
     const mask_png_base64 = await blobToBase64NoPrefix(maskPngBlob);
-
     const resp = await this.fetchWithTimeout(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        scene,
-        mask_png_base64,
-        occ_threshold: occThreshold,
-        function: func,
-      }),
+      body: JSON.stringify({ scene, mask_png_base64, occ_threshold: occThreshold, function: func }),
     });
-
     if (!resp.ok) throw parseError(resp.status, await safeReadJson(resp));
     const json = await resp.json();
-    // 兼容：{label} 或直接返回 label
     return { label: (json.label ?? json) as Label };
   }
 
