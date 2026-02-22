@@ -59,6 +59,8 @@ export async function bootstrapApp(): Promise<void> {
 
   const circuitCanvas = byId<HTMLCanvasElement>("circuit-canvas");
   const maskCanvas = byId<HTMLCanvasElement>("mask-canvas");
+  const uiCanvas = byId<HTMLCanvasElement>("ui-canvas");
+  const interactionStatusEl = byId<HTMLSpanElement>("interaction-layer-status");
 
   const circuitCtx = circuitCanvas.getContext("2d");
   const maskCtx = maskCanvas.getContext("2d");
@@ -122,10 +124,43 @@ export async function bootstrapApp(): Promise<void> {
 
   bindPalette(engine, render, log, vocab);
   bindMaskPaint(maskCanvas, maskLayer, () => state.mode === "mask", render);
+
+  const runInteractionLayerDiagnostic = (): boolean => {
+    const uiStyle = getComputedStyle(uiCanvas);
+    const maskStyle = getComputedStyle(maskCanvas);
+    const uiRect = uiCanvas.getBoundingClientRect();
+    const allCanvases = Array.from(document.querySelectorAll("#canvas-container canvas"));
+    const parseZIndex = (value: string): number => {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const uiZIndex = parseZIndex(uiStyle.zIndex);
+    const maxOtherCanvasZIndex = allCanvases
+      .filter((canvas) => canvas !== uiCanvas)
+      .reduce((max, canvas) => Math.max(max, parseZIndex(getComputedStyle(canvas).zIndex)), Number.NEGATIVE_INFINITY);
+
+    const checks = {
+      pointerEventsAuto: uiStyle.pointerEvents === "auto",
+      uiZIndexHigher: uiZIndex > maxOtherCanvasZIndex,
+      rectVisible: uiRect.width > 0 && uiRect.height > 0,
+    };
+    const passed = Object.values(checks).every(Boolean);
+    interactionStatusEl.textContent = passed ? "OK" : "FAIL";
+
+    if (!passed) {
+      log(
+        `⚠️ 交互层状态 FAIL：pointer-events=${uiStyle.pointerEvents}, ui-z=${uiStyle.zIndex}, mask-z=${maskStyle.zIndex}, rect=${uiRect.width.toFixed(1)}x${uiRect.height.toFixed(1)}。请清缓存并强制刷新（Ctrl+F5）。`,
+      );
+    }
+    return passed;
+  };
+
+  runInteractionLayerDiagnostic();
+
   bindCircuitInteractions({
     engine,
     circuitCanvas,
-    uiCanvas: byId<HTMLCanvasElement>("ui-canvas"),
+    uiCanvas,
     canEdit: () => state.mode === "circuit",
     render,
     onChange: syncScene,

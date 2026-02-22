@@ -553,7 +553,11 @@ input[type="range"]{
 }
 #circuit-canvas{ z-index: 1; pointer-events: none; }
 #mask-canvas{ z-index: 2; pointer-events: none; }
-#ui-canvas{ z-index: 3; pointer-events: auto; cursor: crosshair; }
+#ui-canvas{
+  z-index: 3;
+  pointer-events: auto;
+  cursor: crosshair !important;
+}
 
 /* Canvas tools hint */
 .canvas-hint{
