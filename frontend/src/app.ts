@@ -79,8 +79,13 @@ export async function bootstrapApp(): Promise<void> {
   const maskCtx = maskCanvas.getContext("2d");
   if (!circuitCtx || !maskCtx) throw new Error("无法初始化 Canvas 2D 上下文");
 
+  const log = (msg: string): void => {
+    const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    statusLog.textContent = `${line}\n${statusLog.textContent || ""}`;
+  };
+
   const resolution = { w: circuitCanvas.width, h: circuitCanvas.height };
-  const vocab = await loadVocab();
+  const vocab = await loadVocab(log);
   const engine = new CanvasEngine({ resolution, vocab });
   const maskLayer = new MaskLayer({ resolution });
 
@@ -89,11 +94,6 @@ export async function bootstrapApp(): Promise<void> {
     scene: engine.serializeScene(),
     label: null,
     maskBlob: null,
-  };
-
-  const log = (msg: string): void => {
-    const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    statusLog.textContent = `${line}\n${statusLog.textContent || ""}`;
   };
 
   const logError = (err: unknown, hint: string): void => {
@@ -662,6 +662,10 @@ function bindPalette(engine: CanvasEngine, render: () => void, log: (msg: string
     const keyword = search.value.trim().toLowerCase();
     const filtered = types.filter((t) => t.toLowerCase().includes(keyword));
     palette.innerHTML = "";
+    const count = document.createElement("div");
+    count.className = "muted small";
+    count.textContent = `已加载器件类型: ${types.length}`;
+    palette.appendChild(count);
     filtered.slice(0, 80).forEach((type, idx) => {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -676,7 +680,10 @@ function bindPalette(engine: CanvasEngine, render: () => void, log: (msg: string
     });
 
     if (!filtered.length) {
-      palette.innerHTML = '<div class="muted">无匹配器件类型</div>';
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "无匹配器件类型";
+      palette.appendChild(empty);
     }
   };
 
@@ -684,15 +691,46 @@ function bindPalette(engine: CanvasEngine, render: () => void, log: (msg: string
   redraw();
 }
 
-async function loadVocab(): Promise<any> {
-  const candidates = ["/vocab.json", "../shared/vocab.json", "../../shared/vocab.json"];
+function validateVocab(vocab: any): string | null {
+  const types = vocab?.types;
+  if (!types || typeof types !== "object" || Array.isArray(types)) {
+    return "vocab.types 缺失或格式非法";
+  }
+  const typeCount = Object.keys(types).length;
+  if (typeCount <= 1) {
+    return `vocab.types 数量不足（当前 ${typeCount}，要求 > 1）`;
+  }
+  return null;
+}
+
+async function loadVocab(log: (msg: string) => void): Promise<any> {
+  const candidates = ["/shared/vocab.json", "/vocab.json", "../shared/vocab.json", "../../shared/vocab.json"];
+  const errors: string[] = [];
   for (const url of candidates) {
     try {
       const resp = await fetch(url);
-      if (resp.ok) return await resp.json();
-    } catch {
-      // continue
+      if (!resp.ok) {
+        const reason = `HTTP ${resp.status}`;
+        errors.push(`${url}: ${reason}`);
+        log(`⚠️ vocab 候选加载失败：${url}（${reason}）`);
+        continue;
+      }
+      const data = await resp.json();
+      const validationError = validateVocab(data);
+      if (validationError) {
+        errors.push(`${url}: ${validationError}`);
+        log(`⚠️ vocab 候选校验失败：${url}（${validationError}）`);
+        continue;
+      }
+      log(`✅ vocab 加载成功：${url}（types=${Object.keys(data.types).length}）`);
+      return data;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      errors.push(`${url}: ${reason}`);
+      log(`⚠️ vocab 候选加载异常：${url}（${reason}）`);
     }
   }
-  return { types: { R: { size: { w: 90, h: 40 }, pins: [{ name: "A", x: -45, y: 0 }, { name: "B", x: 45, y: 0 }] } } };
+
+  const detail = errors.length ? errors.join("; ") : "无可用候选";
+  throw new Error(`vocab 加载失败：${detail}`);
 }
