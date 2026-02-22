@@ -33,6 +33,7 @@ import hashlib
 import json
 import logging
 import math
+import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -353,7 +354,7 @@ def place_nodes_random_nonoverlap(
     margin: int,
     max_tries: int,
     rng: np.random.Generator,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Randomly place nodes within canvas bounds without bbox overlaps.
 
     Args:
@@ -365,7 +366,8 @@ def place_nodes_random_nonoverlap(
         rng: numpy random generator
 
     Returns:
-        nodes: the same list with updated node.pos.{x,y}
+        (nodes, stats): the same list with updated node.pos.{x,y} and
+        placement diagnostics
 
     Notes:
         - Collision check uses axis-aligned bbox, ignoring rotation.
@@ -380,8 +382,56 @@ def place_nodes_random_nonoverlap(
     order = list(range(len(nodes)))
     rng.shuffle(order)
 
+    t_start = time.perf_counter()
+
     placed_bboxes: List[Tuple[float, float, float, float]] = []
+    spatial_cells: Dict[Tuple[int, int], List[int]] = {}
+
+    size_samples: List[float] = []
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        comp_type = str(n.get("type") or "")
+        base_w, base_h = _canon_type_size(comp_type, vocab)
+        scale = _safe_float(n.get("scale", 1.0), 1.0)
+        if not (scale > 0.0):
+            scale = 1.0
+        size_samples.append(max(float(base_w) * float(scale), float(base_h) * float(scale)))
+
+    bucket_size = max(32.0, float(np.median(size_samples) if size_samples else 80.0))
+
+    def _bbox_to_cells(bb: Tuple[float, float, float, float]) -> List[Tuple[int, int]]:
+        x0, y0, x1, y1 = bb
+        gx0 = int(math.floor(x0 / bucket_size))
+        gy0 = int(math.floor(y0 / bucket_size))
+        gx1 = int(math.floor(x1 / bucket_size))
+        gy1 = int(math.floor(y1 / bucket_size))
+        cells: List[Tuple[int, int]] = []
+        for gx in range(gx0, gx1 + 1):
+            for gy in range(gy0, gy1 + 1):
+                cells.append((gx, gy))
+        return cells
+
+    def _query_candidates(bb: Tuple[float, float, float, float]) -> List[int]:
+        ids: List[int] = []
+        seen: set[int] = set()
+        for c in _bbox_to_cells(bb):
+            for idx2 in spatial_cells.get(c, []):
+                if idx2 in seen:
+                    continue
+                seen.add(idx2)
+                ids.append(idx2)
+        return ids
+
+    def _insert_bbox(bb: Tuple[float, float, float, float], bbox_idx: int) -> None:
+        for c in _bbox_to_cells(bb):
+            spatial_cells.setdefault(c, []).append(bbox_idx)
+
     failures = 0
+    fallback_nodes = 0
+    total_attempts = 0
+    total_collisions = 0
+    early_exit_nodes = 0
 
     for idx in order:
         n = nodes[idx]
@@ -416,8 +466,15 @@ def place_nodes_random_nonoverlap(
 
         placed = False
         last_bbox = None
+        best_bbox = None
+        best_xy = None
+        best_collision = 10**9
+        attempts = 0
+        early_floor = min(int(max_tries), max(20, int(math.sqrt(max(1, len(nodes)))) * 8))
 
         for _ in range(int(max_tries)):
+            attempts += 1
+            total_attempts += 1
             cx = float(rng.uniform(x_lo, x_hi))
             cy = float(rng.uniform(y_lo, y_hi))
             n.setdefault("pos", {})
@@ -428,29 +485,62 @@ def place_nodes_random_nonoverlap(
             last_bbox = bb
 
             ok = True
-            for bb2 in placed_bboxes:
+            collision_count = 0
+            for idx2 in _query_candidates(bb):
+                bb2 = placed_bboxes[idx2]
                 if _bbox_intersect(bb, bb2):
+                    collision_count += 1
                     ok = False
-                    break
+            if collision_count < best_collision:
+                best_collision = collision_count
+                best_bbox = bb
+                best_xy = (cx, cy)
+            total_collisions += collision_count
             if ok:
                 placed = True
+                bbox_idx = len(placed_bboxes)
                 placed_bboxes.append(bb)
+                _insert_bbox(bb, bbox_idx)
+                break
+
+            fail_ratio = float(total_collisions) / float(max(1, total_attempts))
+            if attempts >= early_floor and fail_ratio >= 0.90:
+                early_exit_nodes += 1
                 break
 
         if not placed:
             failures += 1
+            fallback_nodes += 1
             # Use last sampled bbox if any; otherwise force center.
-            if last_bbox is None:
+            if best_bbox is not None and best_xy is not None:
+                n.setdefault("pos", {})
+                n["pos"]["x"] = float(best_xy[0])
+                n["pos"]["y"] = float(best_xy[1])
+                last_bbox = best_bbox
+            elif last_bbox is None:
                 n.setdefault("pos", {})
                 n["pos"]["x"] = float(w) / 2.0
                 n["pos"]["y"] = float(h) / 2.0
                 last_bbox = _node_bbox(n, vocab)
+            bbox_idx = len(placed_bboxes)
             placed_bboxes.append(last_bbox)
+            _insert_bbox(last_bbox, bbox_idx)
 
     if failures > 0:
         logger.warning("node_placement_failed", extra={"failures": failures, "num_nodes": len(nodes)})
 
-    return nodes
+    stats = {
+        "num_nodes": int(len(nodes)),
+        "total_attempts": int(total_attempts),
+        "failed_nodes": int(failures),
+        "fallback_nodes": int(fallback_nodes),
+        "early_exit_nodes": int(early_exit_nodes),
+        "collision_checks": int(total_collisions),
+        "bucket_size": float(bucket_size),
+        "duration_ms": float((time.perf_counter() - t_start) * 1000.0),
+    }
+
+    return nodes, stats
 
 
 def _point_to_dict(p: Tuple[float, float]) -> Dict[str, float]:
@@ -644,9 +734,14 @@ def shuffle_scene(
 
     p: Dict[str, Any] = dict(params or {})
 
+    t_shuffle_start = time.perf_counter()
+
     # Defaults (v0.3-ish).
     margin = _safe_int(p.get("margin", 20), 20)
-    max_tries = _safe_int(p.get("max_tries", 2000), 2000)
+    requested_max_tries = _safe_int(p.get("max_tries", 2000), 2000)
+    node_count = int(len(list(_iter_nodes(scene))))
+    max_tries_cap = max(120, min(5000, 120 + 25 * max(1, node_count)))
+    max_tries = max(10, min(requested_max_tries, max_tries_cap))
     placement = str(p.get("placement", p.get("placement_mode", "random_nonoverlap")) or "random_nonoverlap")
     route_mode = str(p.get("route_mode", p.get("route", "two_seg")) or "two_seg")
     bend_mode = str(p.get("bend_mode", "auto"))
@@ -664,23 +759,31 @@ def shuffle_scene(
 
     nodes = list(_iter_nodes(scene_out))
 
+    t_place_start = time.perf_counter()
     if placement.strip().lower() in ("random_nonoverlap", "nonoverlap", "random"):
-        place_nodes_random_nonoverlap(nodes, vocab=vocab, resolution=res, margin=margin, max_tries=max_tries, rng=rng)
+        _, placement_stats = place_nodes_random_nonoverlap(
+            nodes, vocab=vocab, resolution=res, margin=margin, max_tries=max_tries, rng=rng
+        )
     else:
         # Unknown placement strategy: fallback to non-overlap.
         logger.warning("unknown_placement_strategy", extra={"placement": placement})
-        place_nodes_random_nonoverlap(nodes, vocab=vocab, resolution=res, margin=margin, max_tries=max_tries, rng=rng)
+        _, placement_stats = place_nodes_random_nonoverlap(
+            nodes, vocab=vocab, resolution=res, margin=margin, max_tries=max_tries, rng=rng
+        )
+    t_place_end = time.perf_counter()
 
     # Write back nodes list to preserve all fields (copy.deepcopy created new list).
     # Our `nodes` list contains the same dict objects as in scene_out["nodes"],
     # so positions are already updated.
 
+    t_route_start = time.perf_counter()
     if return_paths:
         route_all_nets(scene_out, vocab=vocab, mode=route_mode, bend_mode=bend_mode, rng=rng)
     else:
         # Explicitly clear paths to keep output compact.
         for net in _iter_nets(scene_out):
             net["path"] = []
+    t_route_end = time.perf_counter()
 
     # Optionally persist shuffle params into scene meta for reproducibility.
     meta_scene = scene_out.setdefault("meta", {})
@@ -695,6 +798,7 @@ def shuffle_scene(
                     "bend_mode": bend_mode,
                     "margin": margin,
                     "max_tries": max_tries,
+                    "max_tries_requested": requested_max_tries,
                 }
             )
 
@@ -709,6 +813,17 @@ def shuffle_scene(
         "num_nodes": int(len(list(_iter_nodes(scene_out)))),
         "num_nets": int(len(list(_iter_nets(scene_out)))),
         "params": p,
+        "placement_stats": {
+            **placement_stats,
+            "max_tries_requested": int(requested_max_tries),
+            "max_tries_effective": int(max_tries),
+            "max_tries_cap": int(max_tries_cap),
+        },
+        "timings_ms": {
+            "placement": float((t_place_end - t_place_start) * 1000.0),
+            "routing": float((t_route_end - t_route_start) * 1000.0),
+            "total": float((time.perf_counter() - t_shuffle_start) * 1000.0),
+        },
     }
 
     return scene_out, meta
