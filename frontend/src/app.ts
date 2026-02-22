@@ -73,7 +73,6 @@ export async function bootstrapApp(): Promise<void> {
   const circuitCanvas = byId<HTMLCanvasElement>("circuit-canvas");
   const uiCanvas = byId<HTMLCanvasElement>("ui-canvas");
   const maskCanvas = byId<HTMLCanvasElement>("mask-canvas");
-  const uiCanvas = byId<HTMLCanvasElement>("ui-canvas");
   const interactionStatusEl = byId<HTMLSpanElement>("interaction-layer-status");
 
   const circuitCtx = circuitCanvas.getContext("2d");
