@@ -49,8 +49,15 @@ function parseError(status: number, body: any): ApiError {
     return new ApiError(status, String(maybe.error.code), String(maybe.error.message), maybe.error.details || {});
   }
   // 兼容 FastAPI ValidationError 之类的结构
-  if (maybe?.detail?.error?.code && maybe?.detail?.error?.message) {
-    return new ApiError(status, String(maybe.detail.error.code), String(maybe.detail.error.message), maybe.detail.error.details || {});
+  if (maybe?.detail?.error) {
+    const detailError = maybe.detail.error;
+    const code = String(detailError.code || "HTTP_ERROR");
+    const message = String(detailError.message || `Request failed (${status})`);
+    const details =
+      detailError.details && typeof detailError.details === "object"
+        ? detailError.details
+        : { detail: detailError.details ?? maybe.detail };
+    return new ApiError(status, code, message, details);
   }
   return fallback;
 }
