@@ -329,13 +329,21 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   byId<HTMLButtonElement>("btn-shuffle").addEventListener("click", async () => {
+    const parsedSeed = (() => {
+      const raw = byId<HTMLInputElement>("shuffle-seed").value;
+      if (!raw) return undefined;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : undefined;
+    })();
+    const margin = toNum(byId<HTMLInputElement>("shuffle-margin").value, 20);
+
     try {
       const params = {
-        seed: byId<HTMLInputElement>("shuffle-seed").value || undefined,
+        seed: parsedSeed,
         placement: byId<HTMLSelectElement>("shuffle-placement").value,
         route_mode: byId<HTMLSelectElement>("shuffle-route").value,
         bend_mode: byId<HTMLSelectElement>("shuffle-bend").value,
-        margin: toNum(byId<HTMLInputElement>("shuffle-margin").value, 20),
+        margin,
         max_tries: toNum(byId<HTMLInputElement>("shuffle-max-tries").value, 2000),
       };
       const returnPaths = byId<HTMLSelectElement>("shuffle-return-paths").value === "true";
@@ -345,7 +353,11 @@ export async function bootstrapApp(): Promise<void> {
       render();
       log("Shuffle 完成并已刷新画布");
     } catch (err) {
-      logError(err, "Shuffle 失败，请稍后重试");
+      log(`⚠️ ${userFacingError(err, "后端 Shuffle 失败")}`);
+      engine.shuffleNodePositions(parsedSeed, margin);
+      syncScene();
+      render();
+      log("已使用本地 shuffle（保拓扑）");
     }
   });
 

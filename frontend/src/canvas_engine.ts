@@ -71,6 +71,16 @@ function rotateXY(x: number, y: number, rad: number): { x: number; y: number } {
   return { x: x * c - y * s, y: x * s + y * c };
 }
 
+function makeSeededRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export class CanvasEngine {
   private readonly resolution: Resolution;
   private readonly vocab: any;
@@ -202,6 +212,69 @@ export class CanvasEngine {
 
   endpointPosition(ep: Endpoint): Point {
     return this.endpointXY(ep);
+  }
+
+  shuffleNodePositions(seed?: number, margin = 20): void {
+    const nodes = this.scene.nodes;
+    if (!nodes.length) {
+      this.scene.meta = this.scene.meta || {};
+      this.scene.meta.seed = Number.isFinite(seed) ? Number(seed) : Math.floor(Math.random() * 2 ** 31);
+      return;
+    }
+
+    const W = this.resolution.w;
+    const H = this.resolution.h;
+    const pad = Math.max(0, Number(margin) || 0);
+    const chosenSeed = Number.isFinite(seed) ? Number(seed) : Math.floor(Math.random() * 2 ** 31);
+    const rand = makeSeededRandom(chosenSeed);
+
+    type BBox = { x0: number; y0: number; x1: number; y1: number };
+    const bboxes: BBox[] = [];
+    const maxTries = Math.max(200, nodes.length * 500);
+
+    const collides = (a: BBox, b: BBox): boolean => {
+      return !(a.x1 <= b.x0 || a.x0 >= b.x1 || a.y1 <= b.y0 || a.y0 >= b.y1);
+    };
+
+    const originalPos = new Map<string, Point>();
+    for (const n of nodes) originalPos.set(n.id, { ...n.pos });
+
+    for (const n of nodes) {
+      const { w, h } = safeSizeFromVocab(this.vocab, n.type);
+      const s = Number(n.scale ?? 1);
+      const bw = Math.max(1, w * s);
+      const bh = Math.max(1, h * s);
+
+      const minX = pad + bw / 2;
+      const maxX = W - pad - bw / 2;
+      const minY = pad + bh / 2;
+      const maxY = H - pad - bh / 2;
+
+      let placed = false;
+      for (let i = 0; i < maxTries; i++) {
+        const x = minX <= maxX ? minX + rand() * (maxX - minX) : W / 2;
+        const y = minY <= maxY ? minY + rand() * (maxY - minY) : H / 2;
+        const box = { x0: x - bw / 2, y0: y - bh / 2, x1: x + bw / 2, y1: y + bh / 2 };
+        if (bboxes.some((b) => collides(box, b))) continue;
+        n.pos = { x, y };
+        bboxes.push(box);
+        placed = true;
+        break;
+      }
+
+      if (!placed) {
+        const old = originalPos.get(n.id) || { x: W / 2, y: H / 2 };
+        n.pos = old;
+        bboxes.push({ x0: old.x - bw / 2, y0: old.y - bh / 2, x1: old.x + bw / 2, y1: old.y + bh / 2 });
+      }
+    }
+
+    for (const net of this.scene.nets) {
+      net.path = this.computeDefaultNetPath(net);
+    }
+
+    this.scene.meta = this.scene.meta || {};
+    this.scene.meta.seed = chosenSeed;
   }
 
 
