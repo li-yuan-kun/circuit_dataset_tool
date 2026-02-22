@@ -4,7 +4,37 @@ export type ApiClientOptions = {
   /** 例如 "/api/v1"；也可传完整 URL（如 "http://127.0.0.1:8000/api/v1"） */
   baseUrl: string;
   timeoutMs?: number;
+  onRequestEvent?: (event: ApiRequestEvent) => void;
 };
+
+export type ApiRequestErrorType = "AbortError" | "TypeError" | "ApiError";
+
+export type ApiRequestEvent =
+  | {
+      phase: "start";
+      method: string;
+      url: string;
+      timeoutMs: number;
+      startedAtMs: number;
+    }
+  | {
+      phase: "end";
+      method: string;
+      url: string;
+      timeoutMs: number;
+      status: number;
+      elapsedMs: number;
+      startedAtMs: number;
+    }
+  | {
+      phase: "error";
+      method: string;
+      url: string;
+      timeoutMs: number;
+      elapsedMs: number;
+      errorType: ApiRequestErrorType;
+      startedAtMs: number;
+    };
 
 export class ApiError extends Error {
   public readonly status: number;
@@ -76,26 +106,68 @@ async function blobToBase64NoPrefix(blob: Blob): Promise<string> {
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly onRequestEvent?: (event: ApiRequestEvent) => void;
 
   constructor(opts: ApiClientOptions) {
     this.baseUrl = stripTrailingSlash(opts.baseUrl || "");
     this.timeoutMs = Math.max(1000, opts.timeoutMs ?? 20000);
+    this.onRequestEvent = opts.onRequestEvent;
+  }
+
+  private emitRequestEvent(event: ApiRequestEvent): void {
+    try {
+      this.onRequestEvent?.(event);
+    } catch {
+      // ignore observer errors
+    }
   }
 
   private async fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const method = (init?.method || "GET").toUpperCase();
+    const url = typeof input === "string" ? input : String(input);
+    const startedAtMs = Date.now();
+    this.emitRequestEvent({ phase: "start", method, url, timeoutMs: this.timeoutMs, startedAtMs });
+
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const resp = await fetch(input, { ...init, signal: controller.signal });
+      this.emitRequestEvent({
+        phase: "end",
+        method,
+        url,
+        timeoutMs: this.timeoutMs,
+        status: resp.status,
+        elapsedMs: Date.now() - startedAtMs,
+        startedAtMs,
+      });
       return resp;
     } catch (err) {
+      const elapsedMs = Date.now() - startedAtMs;
       if (err instanceof DOMException && err.name === "AbortError") {
-        const url = typeof input === "string" ? input : String(input);
+        this.emitRequestEvent({
+          phase: "error",
+          method,
+          url,
+          timeoutMs: this.timeoutMs,
+          elapsedMs,
+          errorType: "AbortError",
+          startedAtMs,
+        });
         throw new ApiError(408, "REQUEST_TIMEOUT", `Request timeout after ${this.timeoutMs}ms`, {
           timeoutMs: this.timeoutMs,
           url,
         });
       }
+      this.emitRequestEvent({
+        phase: "error",
+        method,
+        url,
+        timeoutMs: this.timeoutMs,
+        elapsedMs,
+        errorType: err instanceof TypeError ? "TypeError" : "ApiError",
+        startedAtMs,
+      });
       throw err;
     } finally {
       clearTimeout(id);
