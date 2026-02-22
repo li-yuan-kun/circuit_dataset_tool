@@ -50,6 +50,10 @@
             value="http://localhost:8000/api/v1"
           />
         </label>
+        <label class="field field--inline" title="请求超时毫秒数，默认 30000">
+          <span class="field__label">超时(ms)</span>
+          <input id="api-timeout-ms" class="input input--mono" type="number" min="1000" step="1000" value="30000" />
+        </label>
         <button id="btn-health" type="button" class="btn">Health</button>
       </div>
     </header>

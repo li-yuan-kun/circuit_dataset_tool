@@ -2,9 +2,12 @@ import "../styles/style.css";
 
 // 轻量初始化：恢复 Base URL 与 range 显示
 const baseUrlEl = document.getElementById("api-base-url") as HTMLInputElement | null;
+const timeoutEl = document.getElementById("api-timeout-ms") as HTMLInputElement | null;
 try {
   const saved = localStorage.getItem("cdt.apiBaseUrl");
   if (saved && baseUrlEl) baseUrlEl.value = saved;
+  const savedTimeoutMs = localStorage.getItem("cdt.apiTimeoutMs");
+  if (savedTimeoutMs && timeoutEl) timeoutEl.value = savedTimeoutMs;
 } catch {
   // ignore storage errors in private mode
 }

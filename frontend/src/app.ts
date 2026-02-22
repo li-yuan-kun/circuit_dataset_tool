@@ -61,8 +61,34 @@ function downloadBlob(name: string, blob: Blob): void {
 }
 
 function userFacingError(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && err.code === "REQUEST_TIMEOUT") {
+    const timeoutMs = Number(err.details?.timeoutMs);
+    const seconds = Number.isFinite(timeoutMs) ? (timeoutMs / 1000).toFixed(0) : "30";
+    return `请求超时（${seconds}s），请检查后端负载或适当增大超时后重试`;
+  }
+  if (err instanceof Error && err.name === "AbortError") {
+    return "请求超时，请检查后端负载或适当增大超时后重试";
+  }
   if (err instanceof Error) return `${fallback}：${err.message}`;
   return fallback;
+}
+
+function readApiTimeoutMs(): number {
+  const timeoutEl = byId<HTMLInputElement>("api-timeout-ms");
+  const parsed = Number(timeoutEl.value);
+  const timeoutMs = Number.isFinite(parsed) ? Math.max(1000, Math.round(parsed)) : 30000;
+  timeoutEl.value = String(timeoutMs);
+  try {
+    localStorage.setItem("cdt.apiTimeoutMs", String(timeoutMs));
+  } catch {
+    // ignore
+  }
+  return timeoutMs;
+}
+
+function isTimeoutError(err: unknown): boolean {
+  if (err instanceof ApiError && err.code === "REQUEST_TIMEOUT") return true;
+  return err instanceof Error && err.name === "AbortError";
 }
 
 export async function bootstrapApp(): Promise<void> {
@@ -125,12 +151,13 @@ export async function bootstrapApp(): Promise<void> {
   const getApi = (): ApiClient => {
     const baseUrlEl = byId<HTMLInputElement>("api-base-url");
     const baseUrl = (baseUrlEl.value || "").trim();
+    const timeoutMs = readApiTimeoutMs();
     try {
       localStorage.setItem("cdt.apiBaseUrl", baseUrl);
     } catch {
       // ignore
     }
-    return new ApiClient({ baseUrl, timeoutMs: 30000 });
+    return new ApiClient({ baseUrl, timeoutMs });
   };
 
   const syncScene = (): Scene => {
@@ -341,6 +368,7 @@ export async function bootstrapApp(): Promise<void> {
       const functionValue = byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value;
       const occThreshold = toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9);
       const maskBlob = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
+      const startedAt = performance.now();
       const { label } = await getApi().computeLabel(syncScene(), maskBlob, occThreshold, functionValue);
       state.label = label;
       refreshLabelUi();
@@ -374,7 +402,7 @@ export async function bootstrapApp(): Promise<void> {
     })();
     const margin = toNum(byId<HTMLInputElement>("shuffle-margin").value, 20);
 
-    try {
+    const doShuffle = async (): Promise<void> => {
       const params = {
         seed: parsedSeed,
         placement: byId<HTMLSelectElement>("shuffle-placement").value,
@@ -384,17 +412,40 @@ export async function bootstrapApp(): Promise<void> {
         max_tries: toNum(byId<HTMLInputElement>("shuffle-max-tries").value, 2000),
       };
       const returnPaths = byId<HTMLSelectElement>("shuffle-return-paths").value === "true";
+      const startedAt = performance.now();
       const { scene_shuffled } = await getApi().shuffleScene(syncScene(), params, returnPaths);
       engine.loadScene(scene_shuffled);
       syncScene();
       render();
+      log(`Shuffle 请求耗时 ${(performance.now() - startedAt).toFixed(0)}ms`);
       log("Shuffle 完成并已刷新画布");
+    };
+
+    try {
+      await doShuffle();
     } catch (err) {
       log(`⚠️ ${userFacingError(err, "后端 Shuffle 失败")}`);
-      engine.shuffleNodePositions(parsedSeed, margin);
-      syncScene();
-      render();
-      log("已使用本地 shuffle（保拓扑）");
+      if (isTimeoutError(err)) {
+        const timeoutMs = readApiTimeoutMs();
+        const retry = window.confirm(
+          `后端 Shuffle 请求超时（${Math.round(timeoutMs / 1000)}s）。\n建议检查后端负载或提高超时。\n是否立即重试一次？`,
+        );
+        if (retry) {
+          try {
+            await doShuffle();
+          } catch (retryErr) {
+            logError(retryErr, "重试 Shuffle 仍失败");
+          }
+        }
+        return;
+      }
+
+      if (err instanceof ApiError) {
+        engine.shuffleNodePositions(parsedSeed, margin);
+        syncScene();
+        render();
+        log("后端返回业务错误，已使用本地 shuffle（保拓扑）");
+      }
     }
   });
 
