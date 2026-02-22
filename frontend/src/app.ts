@@ -127,10 +127,10 @@ export async function bootstrapApp(): Promise<void> {
 
   const syncInteractionCanvas = (): void => {
     const isCircuitMode = state.mode === "circuit";
-    uiCanvas.style.pointerEvents = isCircuitMode ? "auto" : "none";
-    uiCanvas.style.cursor = isCircuitMode ? "crosshair" : "default";
-    maskCanvas.style.pointerEvents = isCircuitMode ? "none" : "auto";
-    maskCanvas.style.cursor = isCircuitMode ? "default" : "crosshair";
+    uiCanvas.style.pointerEvents = "auto";
+    maskCanvas.style.pointerEvents = "none";
+    uiCanvas.style.cursor = isCircuitMode ? "crosshair" : "cell";
+    maskCanvas.style.cursor = "default";
   };
 
   const refreshLabelUi = (): void => {
@@ -144,7 +144,7 @@ export async function bootstrapApp(): Promise<void> {
   };
 
   bindPalette(engine, render, log, vocab);
-  bindMaskPaint(maskCanvas, maskLayer, () => state.mode === "mask", render);
+  bindMaskPaint(uiCanvas, maskLayer, () => state.mode === "mask", render);
 
   const runInteractionLayerDiagnostic = (): boolean => {
     const uiStyle = getComputedStyle(uiCanvas);
@@ -429,6 +429,20 @@ export async function bootstrapApp(): Promise<void> {
 }
 
 function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, log: (msg: string) => void): void {
+  const availableTypes = new Set(Object.keys(vocab?.types ?? {}));
+
+  const resolveType = (preferred: string[], fallback: string): string => {
+    for (const type of preferred) {
+      if (availableTypes.has(type)) return type;
+    }
+    return fallback;
+  };
+
+  const SOURCE_TYPE = resolveType(["V", "VIN", "VSRC"], "R");
+  const GROUND_TYPE = resolveType(["GND", "GROUND", "AGND"], "C");
+  const RESISTOR_TYPE = resolveType(["R", "RES"], "R");
+  const CAPACITOR_TYPE = resolveType(["C", "CAP"], "C");
+
   const addChain = (types: string[], y: number): string[] => {
     return types.map((type, idx) => engine.addNode(type, { x: 180 + idx * 180, y }));
   };
@@ -436,40 +450,43 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
   const connectByEnds = (nodeA: string, typeA: string, nodeB: string, typeB: string): void => {
     const pinsA = getPinsFromVocab(vocab, typeA);
     const pinsB = getPinsFromVocab(vocab, typeB);
-    if (!pinsA.length || !pinsB.length) return;
+    if (!pinsA.length || !pinsB.length) {
+      log(`⚠️ 预设连接跳过：${typeA}(${pinsA.length}) -> ${typeB}(${pinsB.length}) 缺少 pin 定义`);
+      return;
+    }
     engine.connectPins({ node: nodeA, pin: pinsA[pinsA.length - 1] }, { node: nodeB, pin: pinsB[0] });
   };
 
   bindOptionalClick("btn-preset-vrcgnd", () => {
     engine.clear();
-    const types = ["V", "R", "C", "GND"];
+    const types = [SOURCE_TYPE, RESISTOR_TYPE, CAPACITOR_TYPE, GROUND_TYPE];
     const ids = addChain(types, 360);
     for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
     afterApply();
-    log("已加载预设：V-R-C-GND（4 器件）");
+    log(`已加载预设：${types.join("-")}（4 器件）`);
   }, log);
 
   bindOptionalClick("btn-preset-rc-parallel", () => {
     engine.clear();
-    const v = engine.addNode("V", { x: 200, y: 380 });
-    const r = engine.addNode("R", { x: 420, y: 300 });
-    const c = engine.addNode("C", { x: 420, y: 460 });
-    const gnd = engine.addNode("GND", { x: 680, y: 380 });
-    connectByEnds(v, "V", r, "R");
-    connectByEnds(v, "V", c, "C");
-    connectByEnds(r, "R", gnd, "GND");
-    connectByEnds(c, "C", gnd, "GND");
+    const source = engine.addNode(SOURCE_TYPE, { x: 200, y: 380 });
+    const resistor = engine.addNode(RESISTOR_TYPE, { x: 420, y: 300 });
+    const capacitor = engine.addNode(CAPACITOR_TYPE, { x: 420, y: 460 });
+    const ground = engine.addNode(GROUND_TYPE, { x: 680, y: 380 });
+    connectByEnds(source, SOURCE_TYPE, resistor, RESISTOR_TYPE);
+    connectByEnds(source, SOURCE_TYPE, capacitor, CAPACITOR_TYPE);
+    connectByEnds(resistor, RESISTOR_TYPE, ground, GROUND_TYPE);
+    connectByEnds(capacitor, CAPACITOR_TYPE, ground, GROUND_TYPE);
     afterApply();
-    log("已加载预设：R∥C + GND（4 器件）");
+    log(`已加载预设：${RESISTOR_TYPE}∥${CAPACITOR_TYPE} + ${GROUND_TYPE}（4 器件）`);
   }, log);
 
   bindOptionalClick("btn-preset-rcladder", () => {
     engine.clear();
-    const types = ["V", "R", "C", "R", "GND"];
+    const types = [SOURCE_TYPE, RESISTOR_TYPE, CAPACITOR_TYPE, RESISTOR_TYPE, GROUND_TYPE];
     const ids = addChain(types, 380);
     for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
     afterApply();
-    log("已加载预设：R-C-R 梯形（5 器件）");
+    log(`已加载预设：${RESISTOR_TYPE}-${CAPACITOR_TYPE}-${RESISTOR_TYPE} 梯形（5 器件）`);
   }, log);
 }
 
@@ -602,7 +619,7 @@ function bindCircuitInteractions(opts: {
 }
 
 function bindMaskPaint(
-  maskCanvas: HTMLCanvasElement,
+  interactionCanvas: HTMLCanvasElement,
   maskLayer: MaskLayer,
   canPaint: () => boolean,
   render: () => void
@@ -610,14 +627,14 @@ function bindMaskPaint(
   let painting = false;
 
   const point = (ev: MouseEvent) => {
-    const rect = maskCanvas.getBoundingClientRect();
+    const rect = interactionCanvas.getBoundingClientRect();
     return {
-      x: ((ev.clientX - rect.left) / rect.width) * maskCanvas.width,
-      y: ((ev.clientY - rect.top) / rect.height) * maskCanvas.height,
+      x: ((ev.clientX - rect.left) / rect.width) * interactionCanvas.width,
+      y: ((ev.clientY - rect.top) / rect.height) * interactionCanvas.height,
     };
   };
 
-  maskCanvas.addEventListener("mousedown", (ev) => {
+  interactionCanvas.addEventListener("mousedown", (ev) => {
     if (!canPaint()) return;
     painting = true;
     maskLayer.beginStroke(point(ev));
