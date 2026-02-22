@@ -81,6 +81,15 @@ export class ApiClient {
     try {
       const resp = await fetch(input, { ...init, signal: controller.signal });
       return resp;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        const url = typeof input === "string" ? input : String(input);
+        throw new ApiError(408, "REQUEST_TIMEOUT", `Request timeout after ${this.timeoutMs}ms`, {
+          timeoutMs: this.timeoutMs,
+          url,
+        });
+      }
+      throw err;
     } finally {
       clearTimeout(id);
     }
