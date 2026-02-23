@@ -217,7 +217,22 @@ export class MaskLayer {
     this.ctx.save();
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.resolution.w, this.resolution.h);
+
+    // 后端返回的是二值灰度图（RGB=0/255, alpha=255），
+    // 本地画布内部约定“alpha>0”表示被遮挡。
+    // 因此导入时需要将亮度映射为 alpha，避免把整张图误判为全遮挡。
     this.ctx.drawImage(bmp, 0, 0, this.resolution.w, this.resolution.h);
+    const image = this.ctx.getImageData(0, 0, this.resolution.w, this.resolution.h);
+    const d = image.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const luminance = d[i];
+      const a = luminance > 127 ? 255 : 0;
+      d[i] = 255;
+      d[i + 1] = 255;
+      d[i + 2] = 255;
+      d[i + 3] = a;
+    }
+    this.ctx.putImageData(image, 0, 0);
     this.ctx.restore();
     bmp.close();
   }
