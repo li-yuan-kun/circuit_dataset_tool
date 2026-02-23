@@ -275,7 +275,15 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   bindPalette(engine, render, log, vocab);
-  bindMaskPaint(uiCanvas, maskLayer, () => state.mode === "mask", render);
+  bindMaskPaint(
+    uiCanvas,
+    maskLayer,
+    () => state.mode === "mask",
+    () => {
+      state.maskBlob = null;
+    },
+    render,
+  );
 
   const runInteractionLayerDiagnostic = (): boolean => {
     const uiStyle = getComputedStyle(uiCanvas);
@@ -443,10 +451,16 @@ export async function bootstrapApp(): Promise<void> {
   byId<HTMLButtonElement>("btn-generate-mask").addEventListener("click", async () => {
     try {
       const strategy = byId<HTMLSelectElement>("mask-strategy").value;
+      const seedInputEl = byId<HTMLInputElement>("mask-seed");
+      const seedInput = seedInputEl.value.trim();
+      const seed = seedInput || String(Math.floor(Math.random() * 2 ** 31));
+      if (!seedInput) {
+        seedInputEl.value = seed;
+      }
       const params = {
         ratio: toNum(byId<HTMLInputElement>("mask-ratio").value, 0.35),
         scale: toNum(byId<HTMLInputElement>("mask-scale").value, 64),
-        seed: byId<HTMLInputElement>("mask-seed").value || undefined,
+        seed,
       };
       const { maskPngBlob } = await getApi().generateMask(syncScene(), strategy, params);
       await maskLayer.importMaskBlob(maskPngBlob);
@@ -855,6 +869,7 @@ function bindMaskPaint(
   interactionCanvas: HTMLCanvasElement,
   maskLayer: MaskLayer,
   canPaint: () => boolean,
+  onMaskMutated: () => void,
   render: () => void
 ): void {
   let painting = false;
@@ -871,11 +886,13 @@ function bindMaskPaint(
     if (!canPaint()) return;
     painting = true;
     maskLayer.beginStroke(point(ev));
+    onMaskMutated();
     render();
   });
   window.addEventListener("mousemove", (ev) => {
     if (!painting) return;
     maskLayer.addStrokePoint(point(ev));
+    onMaskMutated();
     render();
   });
   window.addEventListener("mouseup", () => {
