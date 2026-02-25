@@ -1,5 +1,5 @@
 import { ApiClient, ApiError, type ApiRequestEvent } from "./backend_client";
-import { CanvasEngine } from "./canvas_engine";
+import { CanvasEngine, type NodeRenderMode } from "./canvas_engine";
 import { MaskLayer } from "./make_layer";
 import { computeLabelLocalApprox } from "./modules/label_local";
 import type { Label, Scene } from "./modules/types";
@@ -229,6 +229,56 @@ export async function bootstrapApp(): Promise<void> {
     maskLayer.drawOverlay(maskCtx, 0.45);
   };
 
+  const applyNodeRenderSettings = (): void => {
+    const mode = byId<HTMLSelectElement>("node-render-mode").value as NodeRenderMode;
+    const strokeScale = toNum(byId<HTMLInputElement>("node-stroke-scale").value, 1);
+    const showLabel = byId<HTMLInputElement>("node-show-type").checked;
+    engine.setNodeRenderOptions({ mode, strokeScale, showTypeLabelOnSymbol: showLabel });
+
+    try {
+      localStorage.setItem("cdt.nodeRenderMode", mode);
+      localStorage.setItem("cdt.nodeStrokeScale", String(strokeScale));
+      localStorage.setItem("cdt.nodeShowType", String(showLabel));
+    } catch {
+      // ignore
+    }
+  };
+
+  const initNodeRenderSettings = (): void => {
+    const modeEl = byId<HTMLSelectElement>("node-render-mode");
+    const strokeEl = byId<HTMLInputElement>("node-stroke-scale");
+    const strokeText = byId<HTMLSpanElement>("node-stroke-scale-text");
+    const showTypeEl = byId<HTMLInputElement>("node-show-type");
+
+    try {
+      const mode = localStorage.getItem("cdt.nodeRenderMode");
+      if (mode === "symbol" || mode === "box") modeEl.value = mode;
+      const stroke = Number(localStorage.getItem("cdt.nodeStrokeScale"));
+      if (Number.isFinite(stroke)) strokeEl.value = String(Math.max(0.5, Math.min(3, stroke)));
+      const showType = localStorage.getItem("cdt.nodeShowType");
+      if (showType === "true" || showType === "false") showTypeEl.checked = showType === "true";
+    } catch {
+      // ignore
+    }
+
+    strokeText.textContent = Number(strokeEl.value).toFixed(1);
+    applyNodeRenderSettings();
+    modeEl.addEventListener("change", () => {
+      applyNodeRenderSettings();
+      render();
+      log(`器件样式已切换为：${modeEl.value === "box" ? "方框" : "电路符号"}`);
+    });
+    strokeEl.addEventListener("input", () => {
+      strokeText.textContent = Number(strokeEl.value).toFixed(1);
+      applyNodeRenderSettings();
+      render();
+    });
+    showTypeEl.addEventListener("change", () => {
+      applyNodeRenderSettings();
+      render();
+    });
+  };
+
   const syncInteractionCanvas = (): void => {
     const isCircuitMode = state.mode === "circuit";
     uiCanvas.style.pointerEvents = "auto";
@@ -275,6 +325,7 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   bindPalette(engine, render, log, vocab);
+  initNodeRenderSettings();
   bindMaskPaint(
     uiCanvas,
     maskLayer,

@@ -1,6 +1,12 @@
 import type { Scene, Endpoint, Point, Resolution, Node, Net } from "./modules/types";
 
 export type CanvasEngineOptions = { resolution: Resolution; vocab: any };
+export type NodeRenderMode = "symbol" | "box";
+export type NodeRenderOptions = {
+  mode?: NodeRenderMode;
+  strokeScale?: number;
+  showTypeLabelOnSymbol?: boolean;
+};
 
 function deepCopy<T>(obj: T): T {
   // structuredClone 在现代浏览器可用；否则退回 JSON
@@ -309,6 +315,9 @@ export class CanvasEngine {
   private readonly pathCache = new Map<string, { hash: string; path: Point[]; failed: boolean }>();
   private pendingPathRefreshNodes = new Set<string>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private nodeRenderMode: NodeRenderMode = "symbol";
+  private nodeStrokeScale = 1;
+  private showTypeLabelOnSymbol = false;
 
   constructor(opts: CanvasEngineOptions) {
     this.resolution = opts.resolution;
@@ -364,6 +373,12 @@ export class CanvasEngine {
   clear(): void {
     this.scene = this.makeEmptyScene();
     this.sel = null;
+  }
+
+  setNodeRenderOptions(opts: NodeRenderOptions): void {
+    if (opts.mode === "symbol" || opts.mode === "box") this.nodeRenderMode = opts.mode;
+    if (Number.isFinite(opts.strokeScale)) this.nodeStrokeScale = Math.max(0.5, Math.min(3, Number(opts.strokeScale)));
+    if (typeof opts.showTypeLabelOnSymbol === "boolean") this.showTypeLabelOnSymbol = opts.showTypeLabelOnSymbol;
   }
 
   addNode(type: string, pos: Point): string {
@@ -961,10 +976,10 @@ export class CanvasEngine {
       ctx.translate(n.pos.x, n.pos.y);
       ctx.rotate(rotToRad(n.rot));
       ctx.strokeStyle = isSel ? "#1e88e5" : "#333";
-      ctx.lineWidth = isSel ? 3 : 2;
+      ctx.lineWidth = (isSel ? 3 : 2) * this.nodeStrokeScale;
 
-      const rendered = drawComponentSymbol(ctx, n.type, bw, bh);
-      if (!rendered) {
+      const rendered = this.nodeRenderMode === "symbol" && drawComponentSymbol(ctx, n.type, bw, bh);
+      if (!rendered || this.nodeRenderMode === "box") {
         ctx.fillStyle = "#f6f6f6";
         ctx.beginPath();
         ctx.rect(-bw / 2, -bh / 2, bw, bh);
@@ -977,6 +992,12 @@ export class CanvasEngine {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(n.type, 0, 0);
+      } else if (this.showTypeLabelOnSymbol) {
+        ctx.fillStyle = "#111";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(n.type, 0, bh / 2 + 6);
       }
 
       // pins
