@@ -101,6 +101,34 @@
               <li>删除：选中后按 Delete / Backspace</li>
             </ul>
           </details>
+
+          <details class="details">
+            <summary>器件外观调整</summary>
+            <div class="row">
+              <label class="field">
+                <span class="field__label">渲染模式</span>
+                <select id="node-render-mode" class="select">
+                  <option value="symbol" selected>电路符号</option>
+                  <option value="box">方框 + 名称</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <label class="field">
+                <span class="field__label">符号线宽倍率</span>
+                <div class="field__control field__control--range">
+                  <input id="node-stroke-scale" type="range" min="0.5" max="3" step="0.1" value="1" />
+                  <span id="node-stroke-scale-text" class="mono">1.0</span>
+                </div>
+              </label>
+            </div>
+            <div class="row">
+              <label class="field field--inline">
+                <input id="node-show-type" type="checkbox" />
+                <span class="field__label">在符号下方显示类型名</span>
+              </label>
+            </div>
+          </details>
         </section>
 
         <section class="panel" aria-label="Mask tools">
