@@ -279,6 +279,71 @@ export async function bootstrapApp(): Promise<void> {
     });
   };
 
+  const initCustomSymbolUpload = (): void => {
+    const typeEl = byId<HTMLSelectElement>("custom-symbol-type");
+    const statusEl = byId<HTMLDivElement>("custom-symbol-status");
+    const fileEl = byId<HTMLInputElement>("file-custom-symbol");
+
+    const types = Object.keys(vocab?.types ?? {}).sort();
+    typeEl.innerHTML = "";
+    for (const t of types) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      typeEl.appendChild(opt);
+    }
+
+    const refreshStatus = () => {
+      const t = typeEl.value;
+      statusEl.textContent = engine.hasCustomSymbol(t)
+        ? `已为 ${t} 配置自定义符号（优先于内置图形）`
+        : `当前 ${t} 使用内置符号`;
+    };
+
+    const readFileAsDataUrl = (file: File): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+        reader.readAsDataURL(file);
+      });
+
+    bindOptionalClick("btn-upload-custom-symbol", () => fileEl.click(), log);
+    bindOptionalClick("btn-clear-custom-symbol", () => {
+      const t = typeEl.value;
+      engine.clearCustomSymbol(t);
+      refreshStatus();
+      render();
+      log(`已移除 ${t} 的自定义符号`);
+    }, log);
+
+    fileEl.addEventListener("change", async () => {
+      const file = fileEl.files?.[0];
+      if (!file) return;
+      const t = typeEl.value;
+      try {
+        const src = await readFileAsDataUrl(file);
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error("图片解码失败"));
+          image.src = src;
+        });
+        engine.setCustomSymbol(t, img);
+        refreshStatus();
+        render();
+        log(`已为 ${t} 应用自定义符号：${file.name}`);
+      } catch (err) {
+        logError(err, `上传 ${t} 自定义符号失败`);
+      } finally {
+        fileEl.value = "";
+      }
+    });
+
+    typeEl.addEventListener("change", refreshStatus);
+    refreshStatus();
+  };
+
   const syncInteractionCanvas = (): void => {
     const isCircuitMode = state.mode === "circuit";
     uiCanvas.style.pointerEvents = "auto";
@@ -326,6 +391,7 @@ export async function bootstrapApp(): Promise<void> {
 
   bindPalette(engine, render, log, vocab);
   initNodeRenderSettings();
+  initCustomSymbolUpload();
   bindMaskPaint(
     uiCanvas,
     maskLayer,
@@ -914,6 +980,29 @@ function bindCircuitInteractions(opts: {
       log(`已删除连线：${sel.netId}`);
     }
   });
+
+  uiCanvas.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!canEdit()) return;
+      const sel = engine.getSelection();
+      if (!sel?.nodeId) return;
+      const node = engine.getNodeById(sel.nodeId);
+      if (!node) return;
+
+      ev.preventDefault();
+      if (ev.altKey) {
+        const step = ev.deltaY < 0 ? 10 : -10;
+        engine.rotateNode(node.id, Number(node.rot ?? 0) + step);
+      } else {
+        const scaleStep = ev.deltaY < 0 ? 1.08 : 0.92;
+        engine.scaleNode(node.id, Number(node.scale ?? 1) * scaleStep);
+      }
+      onChange();
+      redrawAll();
+    },
+    { passive: false }
+  );
 }
 
 function bindMaskPaint(

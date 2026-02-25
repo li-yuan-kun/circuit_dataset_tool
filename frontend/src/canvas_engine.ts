@@ -8,6 +8,8 @@ export type NodeRenderOptions = {
   showTypeLabelOnSymbol?: boolean;
 };
 
+type CustomSymbol = { img: HTMLImageElement };
+
 function deepCopy<T>(obj: T): T {
   // structuredClone 在现代浏览器可用；否则退回 JSON
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -318,6 +320,7 @@ export class CanvasEngine {
   private nodeRenderMode: NodeRenderMode = "symbol";
   private nodeStrokeScale = 1;
   private showTypeLabelOnSymbol = false;
+  private readonly customSymbols = new Map<string, CustomSymbol>();
 
   constructor(opts: CanvasEngineOptions) {
     this.resolution = opts.resolution;
@@ -379,6 +382,20 @@ export class CanvasEngine {
     if (opts.mode === "symbol" || opts.mode === "box") this.nodeRenderMode = opts.mode;
     if (Number.isFinite(opts.strokeScale)) this.nodeStrokeScale = Math.max(0.5, Math.min(3, Number(opts.strokeScale)));
     if (typeof opts.showTypeLabelOnSymbol === "boolean") this.showTypeLabelOnSymbol = opts.showTypeLabelOnSymbol;
+  }
+
+  setCustomSymbol(type: string, img: HTMLImageElement): void {
+    if (!type) return;
+    this.customSymbols.set(String(type), { img });
+  }
+
+  clearCustomSymbol(type: string): void {
+    if (!type) return;
+    this.customSymbols.delete(String(type));
+  }
+
+  hasCustomSymbol(type: string): boolean {
+    return this.customSymbols.has(String(type));
   }
 
   addNode(type: string, pos: Point): string {
@@ -978,7 +995,21 @@ export class CanvasEngine {
       ctx.strokeStyle = isSel ? "#1e88e5" : "#333";
       ctx.lineWidth = (isSel ? 3 : 2) * this.nodeStrokeScale;
 
-      const rendered = this.nodeRenderMode === "symbol" && drawComponentSymbol(ctx, n.type, bw, bh);
+      let rendered = false;
+      if (this.nodeRenderMode === "symbol") {
+        const custom = this.customSymbols.get(String(n.type));
+        if (custom?.img?.complete) {
+          const iw = custom.img.naturalWidth || bw;
+          const ih = custom.img.naturalHeight || bh;
+          const fit = Math.min(bw / iw, bh / ih);
+          const dw = iw * fit;
+          const dh = ih * fit;
+          ctx.drawImage(custom.img, -dw / 2, -dh / 2, dw, dh);
+          rendered = true;
+        } else {
+          rendered = drawComponentSymbol(ctx, n.type, bw, bh);
+        }
+      }
       if (!rendered || this.nodeRenderMode === "box") {
         ctx.fillStyle = "#f6f6f6";
         ctx.beginPath();
