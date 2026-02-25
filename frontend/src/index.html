@@ -140,6 +140,35 @@
               <button id="btn-clear-custom-symbol" type="button" class="btn">移除该类型自定义符号</button>
             </div>
             <div id="custom-symbol-status" class="muted small">未配置自定义符号</div>
+
+            <details class="details" open>
+              <summary>手绘器件符号</summary>
+              <div class="row">
+                <label class="field">
+                  <span class="field__label">目标器件类型（可新建）</span>
+                  <input id="draw-symbol-type" class="input input--mono" type="text" placeholder="例如：MyOpAmp 或 R" />
+                </label>
+              </div>
+              <div class="row">
+                <canvas id="draw-symbol-canvas" width="220" height="140" style="border:1px solid #cbd5e1;border-radius:8px;background:#fff;"></canvas>
+              </div>
+              <div class="row">
+                <label class="field">
+                  <span class="field__label">笔触宽度</span>
+                  <div class="field__control field__control--range">
+                    <input id="draw-symbol-width" type="range" min="1" max="16" step="1" value="4" />
+                    <span id="draw-symbol-width-text" class="mono">4</span>
+                  </div>
+                </label>
+              </div>
+              <div class="row row--wrap">
+                <button id="btn-draw-symbol-pen" type="button" class="btn btn--toggle is-active" aria-pressed="true">画笔</button>
+                <button id="btn-draw-symbol-eraser" type="button" class="btn btn--toggle" aria-pressed="false">橡皮擦</button>
+                <button id="btn-draw-symbol-clear" type="button" class="btn">清空画板</button>
+                <button id="btn-draw-symbol-apply" type="button" class="btn btn--primary">应用到器件库</button>
+              </div>
+              <div id="draw-symbol-status" class="muted small">在白板上手绘后点击“应用到器件库”。</div>
+            </details>
           </details>
         </section>
 

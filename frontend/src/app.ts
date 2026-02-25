@@ -279,7 +279,7 @@ export async function bootstrapApp(): Promise<void> {
     });
   };
 
-  const initCustomSymbolUpload = (): void => {
+  const initCustomSymbolUpload = (refreshPalette: () => void): void => {
     const typeEl = byId<HTMLSelectElement>("custom-symbol-type");
     const statusEl = byId<HTMLDivElement>("custom-symbol-status");
     const fileEl = byId<HTMLInputElement>("file-custom-symbol");
@@ -292,6 +292,28 @@ export async function bootstrapApp(): Promise<void> {
       opt.textContent = t;
       typeEl.appendChild(opt);
     }
+
+    const ensureTypeInVocab = (type: string): void => {
+      const key = String(type || "").trim();
+      if (!key) return;
+      if (!vocab.types || typeof vocab.types !== "object") vocab.types = {};
+      if (vocab.types[key]) return;
+      vocab.types[key] = {
+        category: "custom",
+        display_name: key,
+        size: { w: 110, h: 70 },
+        pins: {
+          p0: { x: -55, y: 0 },
+          p1: { x: 55, y: 0 },
+        },
+      };
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = key;
+      typeEl.appendChild(opt);
+      refreshPalette();
+      log(`已新增器件类型：${key}`);
+    };
 
     const refreshStatus = () => {
       const t = typeEl.value;
@@ -311,6 +333,7 @@ export async function bootstrapApp(): Promise<void> {
     bindOptionalClick("btn-upload-custom-symbol", () => fileEl.click(), log);
     bindOptionalClick("btn-clear-custom-symbol", () => {
       const t = typeEl.value;
+      ensureTypeInVocab(t);
       engine.clearCustomSymbol(t);
       refreshStatus();
       render();
@@ -322,6 +345,7 @@ export async function bootstrapApp(): Promise<void> {
       if (!file) return;
       const t = typeEl.value;
       try {
+        ensureTypeInVocab(t);
         const src = await readFileAsDataUrl(file);
         const img = await new Promise<HTMLImageElement>((resolve, reject) => {
           const image = new Image();
@@ -342,6 +366,25 @@ export async function bootstrapApp(): Promise<void> {
 
     typeEl.addEventListener("change", refreshStatus);
     refreshStatus();
+
+    initDrawSymbolPad({
+      engine,
+      vocab,
+      log,
+      refreshPalette,
+      onApplied: (type) => {
+        const exists = Array.from(typeEl.options).some((o) => o.value === type);
+        if (!exists) {
+          const opt = document.createElement("option");
+          opt.value = type;
+          opt.textContent = type;
+          typeEl.appendChild(opt);
+        }
+        typeEl.value = type;
+        refreshStatus();
+        render();
+      },
+    });
   };
 
   const syncInteractionCanvas = (): void => {
@@ -389,9 +432,9 @@ export async function bootstrapApp(): Promise<void> {
     log(enabled ? "已开启后端 Shuffle 模式" : "已切换为本地 Shuffle 模式");
   });
 
-  bindPalette(engine, render, log, vocab);
+  const paletteApi = bindPalette(engine, render, log, vocab);
   initNodeRenderSettings();
-  initCustomSymbolUpload();
+  initCustomSymbolUpload(paletteApi.refresh);
   bindMaskPaint(
     uiCanvas,
     maskLayer,
@@ -1043,12 +1086,12 @@ function bindMaskPaint(
   });
 }
 
-function bindPalette(engine: CanvasEngine, render: () => void, log: (msg: string) => void, vocab: any): void {
+function bindPalette(engine: CanvasEngine, render: () => void, log: (msg: string) => void, vocab: any): { refresh: () => void } {
   const palette = byId<HTMLDivElement>("palette-list");
   const search = byId<HTMLInputElement>("palette-search");
-  const types = Object.keys(vocab?.types ?? {});
 
   const redraw = () => {
+    const types = Object.keys(vocab?.types ?? {});
     const keyword = search.value.trim().toLowerCase();
     const filtered = types.filter((t) => t.toLowerCase().includes(keyword));
     palette.innerHTML = "";
@@ -1079,6 +1122,135 @@ function bindPalette(engine: CanvasEngine, render: () => void, log: (msg: string
 
   search.addEventListener("input", redraw);
   redraw();
+  return { refresh: redraw };
+}
+
+function initDrawSymbolPad(opts: {
+  engine: CanvasEngine;
+  vocab: any;
+  log: (msg: string) => void;
+  refreshPalette: () => void;
+  onApplied: (type: string) => void;
+}): void {
+  const { engine, vocab, log, refreshPalette, onApplied } = opts;
+  const canvas = byId<HTMLCanvasElement>("draw-symbol-canvas");
+  const ctx = canvas.getContext("2d");
+  const typeInput = byId<HTMLInputElement>("draw-symbol-type");
+  const widthEl = byId<HTMLInputElement>("draw-symbol-width");
+  const widthText = byId<HTMLSpanElement>("draw-symbol-width-text");
+  const statusEl = byId<HTMLDivElement>("draw-symbol-status");
+  const penBtn = byId<HTMLButtonElement>("btn-draw-symbol-pen");
+  const eraserBtn = byId<HTMLButtonElement>("btn-draw-symbol-eraser");
+  if (!ctx) return;
+
+  let drawing = false;
+  let eraseMode = false;
+
+  const updateToolState = () => {
+    penBtn.classList.toggle("is-active", !eraseMode);
+    eraserBtn.classList.toggle("is-active", eraseMode);
+    penBtn.setAttribute("aria-pressed", String(!eraseMode));
+    eraserBtn.setAttribute("aria-pressed", String(eraseMode));
+  };
+
+  const point = (ev: MouseEvent) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((ev.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((ev.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  };
+
+  const clearCanvas = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+  };
+
+  const setStrokeStyle = () => {
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = Math.max(1, Number(widthEl.value) || 4);
+    ctx.globalCompositeOperation = eraseMode ? "destination-out" : "source-over";
+    ctx.strokeStyle = "#111827";
+  };
+
+  clearCanvas();
+  widthText.textContent = widthEl.value;
+  updateToolState();
+
+  canvas.addEventListener("mousedown", (ev) => {
+    drawing = true;
+    const p = point(ev);
+    setStrokeStyle();
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+  });
+  window.addEventListener("mousemove", (ev) => {
+    if (!drawing) return;
+    const p = point(ev);
+    setStrokeStyle();
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  });
+  window.addEventListener("mouseup", () => {
+    drawing = false;
+  });
+
+  widthEl.addEventListener("input", () => {
+    widthText.textContent = widthEl.value;
+  });
+
+  bindOptionalClick("btn-draw-symbol-pen", () => {
+    eraseMode = false;
+    updateToolState();
+  }, log);
+  bindOptionalClick("btn-draw-symbol-eraser", () => {
+    eraseMode = true;
+    updateToolState();
+  }, log);
+  bindOptionalClick("btn-draw-symbol-clear", () => {
+    clearCanvas();
+    statusEl.textContent = "画板已清空。";
+  }, log);
+
+  bindOptionalClick("btn-draw-symbol-apply", () => {
+    const type = typeInput.value.trim();
+    if (!type) {
+      statusEl.textContent = "请先输入器件类型名。";
+      return;
+    }
+
+    if (!vocab.types || typeof vocab.types !== "object") vocab.types = {};
+    if (!vocab.types[type]) {
+      vocab.types[type] = {
+        category: "custom",
+        display_name: type,
+        size: { w: 110, h: 70 },
+        pins: {
+          p0: { x: -55, y: 0 },
+          p1: { x: 55, y: 0 },
+        },
+      };
+      refreshPalette();
+      log(`已通过手绘新增器件类型：${type}`);
+    }
+
+    const dataUrl = canvas.toDataURL("image/png");
+    const img = new Image();
+    img.onload = () => {
+      engine.setCustomSymbol(type, img);
+      onApplied(type);
+      statusEl.textContent = `已将手绘符号应用到 ${type}`;
+      log(`已应用手绘符号：${type}`);
+    };
+    img.onerror = () => {
+      statusEl.textContent = "手绘符号导出失败，请重试。";
+    };
+    img.src = dataUrl;
+  }, log);
 }
 
 function validateVocab(vocab: any): string | null {
