@@ -435,6 +435,7 @@ export async function bootstrapApp(): Promise<void> {
   const paletteApi = bindPalette(engine, render, log, vocab);
   initNodeRenderSettings();
   initCustomSymbolUpload(paletteApi.refresh);
+  initComponentTemplateEditor({ engine, vocab, refreshPalette: paletteApi.refresh, render, log });
   bindMaskPaint(
     uiCanvas,
     maskLayer,
@@ -1251,6 +1252,132 @@ function initDrawSymbolPad(opts: {
     };
     img.src = dataUrl;
   }, log);
+}
+
+function initComponentTemplateEditor(opts: {
+  engine: CanvasEngine;
+  vocab: any;
+  refreshPalette: () => void;
+  render: () => void;
+  log: (msg: string) => void;
+}): void {
+  const { engine, vocab, refreshPalette, render, log } = opts;
+  const typeEl = byId<HTMLSelectElement>("component-template-type");
+  const sizeWEl = byId<HTMLInputElement>("component-size-w");
+  const sizeHEl = byId<HTMLInputElement>("component-size-h");
+  const pinNameEl = byId<HTMLSelectElement>("component-pin-name");
+  const pinXEl = byId<HTMLInputElement>("component-pin-x");
+  const pinYEl = byId<HTMLInputElement>("component-pin-y");
+  const newPinEl = byId<HTMLInputElement>("component-new-pin-name");
+  const statusEl = byId<HTMLDivElement>("component-template-status");
+
+  const ensureTypeConfig = (type: string): any => {
+    if (!vocab.types || typeof vocab.types !== "object") vocab.types = {};
+    if (!vocab.types[type]) {
+      vocab.types[type] = {
+        category: "custom",
+        display_name: type,
+        size: { w: 110, h: 70 },
+        pins: { p0: { x: -55, y: 0 }, p1: { x: 55, y: 0 } },
+      };
+    }
+    const t = vocab.types[type];
+    if (!t.size || typeof t.size !== "object") t.size = { w: 110, h: 70 };
+    if (!t.pins || typeof t.pins !== "object") t.pins = { p0: { x: -55, y: 0 }, p1: { x: 55, y: 0 } };
+    return t;
+  };
+
+  const refreshTypeList = () => {
+    const prev = typeEl.value;
+    typeEl.innerHTML = "";
+    const types = Object.keys(vocab?.types ?? {}).sort();
+    for (const t of types) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      typeEl.appendChild(opt);
+    }
+    if (prev && types.includes(prev)) typeEl.value = prev;
+  };
+
+  const refreshPinList = () => {
+    const type = typeEl.value;
+    if (!type) return;
+    const cfg = ensureTypeConfig(type);
+    sizeWEl.value = String(Math.round(Number(cfg.size?.w ?? 110)));
+    sizeHEl.value = String(Math.round(Number(cfg.size?.h ?? 70)));
+
+    const prevPin = pinNameEl.value;
+    pinNameEl.innerHTML = "";
+    const pins = Object.keys(cfg.pins ?? {});
+    for (const p of pins) {
+      const opt = document.createElement("option");
+      opt.value = p;
+      opt.textContent = p;
+      pinNameEl.appendChild(opt);
+    }
+    if (!pins.length) {
+      cfg.pins = { p0: { x: -55, y: 0 }, p1: { x: 55, y: 0 } };
+      refreshPinList();
+      return;
+    }
+    if (prevPin && pins.includes(prevPin)) pinNameEl.value = prevPin;
+    const pin = cfg.pins[pinNameEl.value] ?? cfg.pins[pins[0]];
+    pinXEl.value = String(Math.round(Number(pin?.x ?? 0)));
+    pinYEl.value = String(Math.round(Number(pin?.y ?? 0)));
+  };
+
+  const applyAndRender = (message: string) => {
+    refreshPalette();
+    refreshTypeList();
+    refreshPinList();
+    render();
+    statusEl.textContent = message;
+    log(message);
+  };
+
+  bindOptionalClick("btn-apply-component-size", () => {
+    const type = typeEl.value;
+    if (!type) return;
+    const cfg = ensureTypeConfig(type);
+    cfg.size.w = Math.max(20, Math.round(Number(sizeWEl.value) || 110));
+    cfg.size.h = Math.max(20, Math.round(Number(sizeHEl.value) || 70));
+    applyAndRender(`已更新 ${type} 尺寸：${cfg.size.w} x ${cfg.size.h}`);
+  }, log);
+
+  bindOptionalClick("btn-apply-component-pin", () => {
+    const type = typeEl.value;
+    const pinName = pinNameEl.value;
+    if (!type || !pinName) return;
+    const cfg = ensureTypeConfig(type);
+    cfg.pins[pinName] = {
+      ...(cfg.pins[pinName] || {}),
+      x: Math.round(Number(pinXEl.value) || 0),
+      y: Math.round(Number(pinYEl.value) || 0),
+    };
+    applyAndRender(`已更新 ${type}.${pinName} 位置：(${cfg.pins[pinName].x}, ${cfg.pins[pinName].y})`);
+  }, log);
+
+  bindOptionalClick("btn-add-component-pin", () => {
+    const type = typeEl.value;
+    const pinName = newPinEl.value.trim();
+    if (!type || !pinName) {
+      statusEl.textContent = "请先选择器件并输入新 Pin 名称。";
+      return;
+    }
+    const cfg = ensureTypeConfig(type);
+    if (!cfg.pins[pinName]) cfg.pins[pinName] = { x: 0, y: 0 };
+    pinNameEl.value = pinName;
+    newPinEl.value = "";
+    applyAndRender(`已新增 Pin：${type}.${pinName}`);
+  }, log);
+
+  typeEl.addEventListener("change", refreshPinList);
+  typeEl.addEventListener("focus", refreshTypeList);
+  pinNameEl.addEventListener("change", refreshPinList);
+
+  refreshTypeList();
+  refreshPinList();
 }
 
 function validateVocab(vocab: any): string | null {

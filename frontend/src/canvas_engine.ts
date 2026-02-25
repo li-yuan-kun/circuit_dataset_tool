@@ -252,6 +252,44 @@ function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.fillText("−", bodyLeft + 12, h * 0.22);
 }
 
+function drawGroundSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const y0 = h * 0.05;
+  ctx.beginPath();
+  ctx.moveTo(0, top);
+  ctx.lineTo(0, y0);
+  ctx.moveTo(left * 0.45, y0);
+  ctx.lineTo(right * 0.45, y0);
+  ctx.moveTo(left * 0.32, y0 + 12);
+  ctx.lineTo(right * 0.32, y0 + 12);
+  ctx.moveTo(left * 0.2, y0 + 24);
+  ctx.lineTo(right * 0.2, y0 + 24);
+  ctx.stroke();
+}
+
+function drawSourceSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const r = Math.max(12, Math.min(w, h) * 0.32);
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, 0);
+  ctx.lineTo(-r, 0);
+  ctx.moveTo(r, 0);
+  ctx.lineTo(w / 2, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 0.55);
+  ctx.lineTo(0, r * 0.55);
+  ctx.moveTo(-r * 0.45, 0);
+  ctx.lineTo(r * 0.45, 0);
+  ctx.stroke();
+}
+
 function drawComponentSymbol(ctx: CanvasRenderingContext2D, type: string, w: number, h: number): boolean {
   switch (String(type).toUpperCase()) {
     case "R":
@@ -287,6 +325,15 @@ function drawComponentSymbol(ctx: CanvasRenderingContext2D, type: string, w: num
       return true;
     case "COMPARATOR":
       drawComparatorSymbol(ctx, w, h);
+      return true;
+    case "GND":
+    case "GROUND":
+      drawGroundSymbol(ctx, w, h);
+      return true;
+    case "V":
+    case "VSOURCE":
+    case "VCC":
+      drawSourceSymbol(ctx, w, h);
       return true;
     default:
       return false;
@@ -996,9 +1043,10 @@ export class CanvasEngine {
       ctx.lineWidth = (isSel ? 3 : 2) * this.nodeStrokeScale;
 
       let rendered = false;
+      const custom = this.customSymbols.get(String(n.type));
+      const hasCustom = Boolean(custom?.img?.complete);
       if (this.nodeRenderMode === "symbol") {
-        const custom = this.customSymbols.get(String(n.type));
-        if (custom?.img?.complete) {
+        if (hasCustom && custom) {
           const iw = custom.img.naturalWidth || bw;
           const ih = custom.img.naturalHeight || bh;
           const fit = Math.min(bw / iw, bh / ih);
@@ -1010,7 +1058,7 @@ export class CanvasEngine {
           rendered = drawComponentSymbol(ctx, n.type, bw, bh);
         }
       }
-      if (!rendered || this.nodeRenderMode === "box") {
+      if (!hasCustom && (!rendered || this.nodeRenderMode === "box")) {
         ctx.fillStyle = "#f6f6f6";
         ctx.beginPath();
         ctx.rect(-bw / 2, -bh / 2, bw, bh);

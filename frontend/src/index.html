@@ -100,6 +100,7 @@
               <li>连线：点击引脚并拖拽到另一个引脚（或按住 Shift）</li>
               <li>删除：选中后按 Delete / Backspace</li>
               <li>选中器件后滚轮：缩放；Alt + 滚轮：旋转</li>
+              <li>可在“器件模板参数编辑”中修改预设器件的宽高和 Pin 坐标</li>
             </ul>
           </details>
 
@@ -168,6 +169,50 @@
                 <button id="btn-draw-symbol-apply" type="button" class="btn btn--primary">应用到器件库</button>
               </div>
               <div id="draw-symbol-status" class="muted small">在白板上手绘后点击“应用到器件库”。</div>
+            </details>
+
+            <details class="details" open>
+              <summary>器件模板参数编辑（尺寸 / Pin）</summary>
+              <div class="row">
+                <label class="field">
+                  <span class="field__label">器件类型</span>
+                  <select id="component-template-type" class="select"></select>
+                </label>
+              </div>
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">宽度 w</span>
+                  <input id="component-size-w" class="input" type="number" min="20" max="600" step="1" value="100" />
+                </label>
+                <label class="field">
+                  <span class="field__label">高度 h</span>
+                  <input id="component-size-h" class="input" type="number" min="20" max="600" step="1" value="80" />
+                </label>
+                <button id="btn-apply-component-size" type="button" class="btn">应用尺寸</button>
+              </div>
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">Pin</span>
+                  <select id="component-pin-name" class="select"></select>
+                </label>
+                <label class="field">
+                  <span class="field__label">Pin X</span>
+                  <input id="component-pin-x" class="input" type="number" min="-500" max="500" step="1" value="0" />
+                </label>
+                <label class="field">
+                  <span class="field__label">Pin Y</span>
+                  <input id="component-pin-y" class="input" type="number" min="-500" max="500" step="1" value="0" />
+                </label>
+                <button id="btn-apply-component-pin" type="button" class="btn">应用 Pin 位置</button>
+              </div>
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">新增 Pin 名称</span>
+                  <input id="component-new-pin-name" class="input input--mono" type="text" placeholder="例如 p2" />
+                </label>
+                <button id="btn-add-component-pin" type="button" class="btn">新增 Pin</button>
+              </div>
+              <div id="component-template-status" class="muted small">可编辑预设器件尺寸和 Pin 坐标（立即生效）。</div>
             </details>
           </details>
         </section>
