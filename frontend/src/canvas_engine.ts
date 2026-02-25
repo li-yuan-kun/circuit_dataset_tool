@@ -1,6 +1,14 @@
 import type { Scene, Endpoint, Point, Resolution, Node, Net } from "./modules/types";
 
 export type CanvasEngineOptions = { resolution: Resolution; vocab: any };
+export type NodeRenderMode = "symbol" | "box";
+export type NodeRenderOptions = {
+  mode?: NodeRenderMode;
+  strokeScale?: number;
+  showTypeLabelOnSymbol?: boolean;
+};
+
+type CustomSymbol = { img: HTMLImageElement };
 
 function deepCopy<T>(obj: T): T {
   // structuredClone 在现代浏览器可用；否则退回 JSON
@@ -71,6 +79,267 @@ function rotateXY(x: number, y: number, rad: number): { x: number; y: number } {
   return { x: x * c - y * s, y: x * s + y * c };
 }
 
+function drawResistorSymbol(ctx: CanvasRenderingContext2D, w: number): void {
+  const start = -w / 2;
+  const end = w / 2;
+  const lead = Math.min(16, w * 0.18);
+  const bodyStart = start + lead;
+  const bodyEnd = end - lead;
+  const step = (bodyEnd - bodyStart) / 8;
+
+  ctx.beginPath();
+  ctx.moveTo(start, 0);
+  ctx.lineTo(bodyStart, 0);
+  for (let i = 0; i <= 7; i++) {
+    const x = bodyStart + step * (i + 1);
+    const y = i === 7 ? 0 : i % 2 === 0 ? -10 : 10;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(end, 0);
+  ctx.stroke();
+}
+
+function drawCapacitorSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const start = -w / 2;
+  const end = w / 2;
+  const plateGap = Math.min(20, w * 0.22);
+  const leftPlateX = -plateGap;
+  const rightPlateX = plateGap;
+  const plateHalf = Math.max(16, h * 0.4);
+
+  ctx.beginPath();
+  ctx.moveTo(start, 0);
+  ctx.lineTo(leftPlateX, 0);
+  ctx.moveTo(rightPlateX, 0);
+  ctx.lineTo(end, 0);
+  ctx.moveTo(leftPlateX, -plateHalf);
+  ctx.lineTo(leftPlateX, plateHalf);
+  ctx.moveTo(rightPlateX, -plateHalf);
+  ctx.lineTo(rightPlateX, plateHalf);
+  ctx.stroke();
+}
+
+function drawNotSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const tipX = right - 14;
+  const bubbleR = 7;
+
+  ctx.beginPath();
+  ctx.moveTo(left, 0);
+  ctx.lineTo(left + 20, 0);
+  ctx.moveTo(tipX + bubbleR * 2, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(left + 20, top);
+  ctx.lineTo(left + 20, bottom);
+  ctx.lineTo(tipX, 0);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(tipX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number, bubble = false): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const bodyLeft = left + 18;
+  const bodyRight = right - 18;
+  const radius = (bottom - top) / 2;
+  const centerY = 0;
+
+  const outStart = bubble ? right - 15 : right - 2;
+  ctx.beginPath();
+  ctx.moveTo(left, -h * 0.25);
+  ctx.lineTo(bodyLeft, -h * 0.25);
+  ctx.moveTo(left, h * 0.25);
+  ctx.lineTo(bodyLeft, h * 0.25);
+  ctx.moveTo(outStart, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(bodyLeft, top);
+  ctx.lineTo(bodyRight, top);
+  ctx.arc(bodyRight, centerY, radius, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(bodyLeft, bottom);
+  ctx.closePath();
+  ctx.stroke();
+
+  if (bubble) {
+    ctx.beginPath();
+    ctx.arc(right - 9, 0, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number, opts: { xor?: boolean; bubble?: boolean } = {}): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const outX = opts.bubble ? right - 14 : right - 2;
+
+  // leads
+  ctx.beginPath();
+  ctx.moveTo(left, -h * 0.25);
+  ctx.quadraticCurveTo(left + 14, -h * 0.25, left + 20, -h * 0.2);
+  ctx.moveTo(left, h * 0.25);
+  ctx.quadraticCurveTo(left + 14, h * 0.25, left + 20, h * 0.2);
+  ctx.moveTo(outX, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  // OR body
+  ctx.beginPath();
+  ctx.moveTo(left + 20, top);
+  ctx.quadraticCurveTo(left + 44, 0, left + 20, bottom);
+  ctx.quadraticCurveTo(right - 28, bottom, outX, 0);
+  ctx.quadraticCurveTo(right - 28, top, left + 20, top);
+  ctx.stroke();
+
+  if (opts.xor) {
+    ctx.beginPath();
+    ctx.moveTo(left + 12, top);
+    ctx.quadraticCurveTo(left + 36, 0, left + 12, bottom);
+    ctx.stroke();
+  }
+
+  if (opts.bubble) {
+    ctx.beginPath();
+    ctx.arc(right - 8, 0, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const bodyLeft = left + 22;
+  const bodyRight = right - 16;
+
+  ctx.beginPath();
+  ctx.moveTo(left, -h * 0.25);
+  ctx.lineTo(bodyLeft, -h * 0.25);
+  ctx.moveTo(left, h * 0.25);
+  ctx.lineTo(bodyLeft, h * 0.25);
+  ctx.moveTo(bodyRight, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(bodyLeft, top);
+  ctx.lineTo(bodyLeft, bottom);
+  ctx.lineTo(bodyRight, 0);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.font = "13px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#111";
+  ctx.fillText("+", bodyLeft + 12, -h * 0.22);
+  ctx.fillText("−", bodyLeft + 12, h * 0.22);
+}
+
+function drawGroundSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const y0 = h * 0.05;
+  ctx.beginPath();
+  ctx.moveTo(0, top);
+  ctx.lineTo(0, y0);
+  ctx.moveTo(left * 0.45, y0);
+  ctx.lineTo(right * 0.45, y0);
+  ctx.moveTo(left * 0.32, y0 + 12);
+  ctx.lineTo(right * 0.32, y0 + 12);
+  ctx.moveTo(left * 0.2, y0 + 24);
+  ctx.lineTo(right * 0.2, y0 + 24);
+  ctx.stroke();
+}
+
+function drawSourceSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const r = Math.max(12, Math.min(w, h) * 0.32);
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, 0);
+  ctx.lineTo(-r, 0);
+  ctx.moveTo(r, 0);
+  ctx.lineTo(w / 2, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 0.55);
+  ctx.lineTo(0, r * 0.55);
+  ctx.moveTo(-r * 0.45, 0);
+  ctx.lineTo(r * 0.45, 0);
+  ctx.stroke();
+}
+
+function drawComponentSymbol(ctx: CanvasRenderingContext2D, type: string, w: number, h: number): boolean {
+  switch (String(type).toUpperCase()) {
+    case "R":
+    case "RESISTOR":
+      drawResistorSymbol(ctx, w);
+      return true;
+    case "C":
+    case "CAPACITOR":
+      drawCapacitorSymbol(ctx, w, h);
+      return true;
+    case "NOT":
+    case "INV":
+    case "INVERTER":
+      drawNotSymbol(ctx, w, h);
+      return true;
+    case "AND":
+      drawAndFamilySymbol(ctx, w, h, false);
+      return true;
+    case "NAND":
+      drawAndFamilySymbol(ctx, w, h, true);
+      return true;
+    case "OR":
+      drawOrFamilySymbol(ctx, w, h);
+      return true;
+    case "NOR":
+      drawOrFamilySymbol(ctx, w, h, { bubble: true });
+      return true;
+    case "XOR":
+      drawOrFamilySymbol(ctx, w, h, { xor: true });
+      return true;
+    case "XNOR":
+      drawOrFamilySymbol(ctx, w, h, { xor: true, bubble: true });
+      return true;
+    case "COMPARATOR":
+      drawComparatorSymbol(ctx, w, h);
+      return true;
+    case "GND":
+    case "GROUND":
+      drawGroundSymbol(ctx, w, h);
+      return true;
+    case "V":
+    case "VSOURCE":
+    case "VCC":
+      drawSourceSymbol(ctx, w, h);
+      return true;
+    default:
+      return false;
+  }
+}
+
 type BBox = { x0: number; y0: number; x1: number; y1: number };
 
 function makeSeededRandom(seed: number): () => number {
@@ -95,6 +364,10 @@ export class CanvasEngine {
   private readonly pathCache = new Map<string, { hash: string; path: Point[]; failed: boolean }>();
   private pendingPathRefreshNodes = new Set<string>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private nodeRenderMode: NodeRenderMode = "symbol";
+  private nodeStrokeScale = 1;
+  private showTypeLabelOnSymbol = false;
+  private readonly customSymbols = new Map<string, CustomSymbol>();
 
   constructor(opts: CanvasEngineOptions) {
     this.resolution = opts.resolution;
@@ -150,6 +423,26 @@ export class CanvasEngine {
   clear(): void {
     this.scene = this.makeEmptyScene();
     this.sel = null;
+  }
+
+  setNodeRenderOptions(opts: NodeRenderOptions): void {
+    if (opts.mode === "symbol" || opts.mode === "box") this.nodeRenderMode = opts.mode;
+    if (Number.isFinite(opts.strokeScale)) this.nodeStrokeScale = Math.max(0.5, Math.min(3, Number(opts.strokeScale)));
+    if (typeof opts.showTypeLabelOnSymbol === "boolean") this.showTypeLabelOnSymbol = opts.showTypeLabelOnSymbol;
+  }
+
+  setCustomSymbol(type: string, img: HTMLImageElement): void {
+    if (!type) return;
+    this.customSymbols.set(String(type), { img });
+  }
+
+  clearCustomSymbol(type: string): void {
+    if (!type) return;
+    this.customSymbols.delete(String(type));
+  }
+
+  hasCustomSymbol(type: string): boolean {
+    return this.customSymbols.has(String(type));
   }
 
   addNode(type: string, pos: Point): string {
@@ -746,21 +1039,45 @@ export class CanvasEngine {
       ctx.save();
       ctx.translate(n.pos.x, n.pos.y);
       ctx.rotate(rotToRad(n.rot));
-      ctx.fillStyle = "#f6f6f6";
       ctx.strokeStyle = isSel ? "#1e88e5" : "#333";
-      ctx.lineWidth = isSel ? 3 : 2;
+      ctx.lineWidth = (isSel ? 3 : 2) * this.nodeStrokeScale;
 
-      ctx.beginPath();
-      ctx.rect(-bw / 2, -bh / 2, bw, bh);
-      ctx.fill();
-      ctx.stroke();
+      let rendered = false;
+      const custom = this.customSymbols.get(String(n.type));
+      const hasCustom = Boolean(custom?.img?.complete);
+      if (this.nodeRenderMode === "symbol") {
+        if (hasCustom && custom) {
+          const iw = custom.img.naturalWidth || bw;
+          const ih = custom.img.naturalHeight || bh;
+          const fit = Math.min(bw / iw, bh / ih);
+          const dw = iw * fit;
+          const dh = ih * fit;
+          ctx.drawImage(custom.img, -dw / 2, -dh / 2, dw, dh);
+          rendered = true;
+        } else {
+          rendered = drawComponentSymbol(ctx, n.type, bw, bh);
+        }
+      }
+      if (!hasCustom && (!rendered || this.nodeRenderMode === "box")) {
+        ctx.fillStyle = "#f6f6f6";
+        ctx.beginPath();
+        ctx.rect(-bw / 2, -bh / 2, bw, bh);
+        ctx.fill();
+        ctx.stroke();
 
-      // type text
-      ctx.fillStyle = "#111";
-      ctx.font = "14px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(n.type, 0, 0);
+        // fallback text
+        ctx.fillStyle = "#111";
+        ctx.font = "14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(n.type, 0, 0);
+      } else if (this.showTypeLabelOnSymbol) {
+        ctx.fillStyle = "#111";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(n.type, 0, bh / 2 + 6);
+      }
 
       // pins
       const pins = iterPinsFromVocab(this.vocab, n.type);
