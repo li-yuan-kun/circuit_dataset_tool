@@ -99,7 +99,47 @@
               <li>移动器件：拖拽器件</li>
               <li>连线：点击引脚并拖拽到另一个引脚（或按住 Shift）</li>
               <li>删除：选中后按 Delete / Backspace</li>
+              <li>选中器件后滚轮：缩放；Alt + 滚轮：旋转</li>
             </ul>
+          </details>
+
+          <details class="details">
+            <summary>器件外观调整</summary>
+            <div class="row">
+              <label class="field">
+                <span class="field__label">渲染模式</span>
+                <select id="node-render-mode" class="select">
+                  <option value="symbol" selected>电路符号</option>
+                  <option value="box">方框 + 名称</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <label class="field">
+                <span class="field__label">符号线宽倍率</span>
+                <div class="field__control field__control--range">
+                  <input id="node-stroke-scale" type="range" min="0.5" max="3" step="0.1" value="1" />
+                  <span id="node-stroke-scale-text" class="mono">1.0</span>
+                </div>
+              </label>
+            </div>
+            <div class="row">
+              <label class="field field--inline">
+                <input id="node-show-type" type="checkbox" />
+                <span class="field__label">在符号下方显示类型名</span>
+              </label>
+            </div>
+            <div class="row">
+              <label class="field">
+                <span class="field__label">上传自定义符号（按器件类型）</span>
+                <select id="custom-symbol-type" class="select"></select>
+              </label>
+            </div>
+            <div class="row row--wrap">
+              <button id="btn-upload-custom-symbol" type="button" class="btn">上传 SVG/PNG</button>
+              <button id="btn-clear-custom-symbol" type="button" class="btn">移除该类型自定义符号</button>
+            </div>
+            <div id="custom-symbol-status" class="muted small">未配置自定义符号</div>
           </details>
         </section>
 
@@ -348,6 +388,7 @@
     <!-- Hidden file pickers -->
     <input id="file-scene" type="file" accept="application/json,.json" hidden />
     <input id="file-mask" type="file" accept="image/png,image/*" hidden />
+    <input id="file-custom-symbol" type="file" accept="image/svg+xml,image/png,image/*" hidden />
 
     <script type="module" src="./main.ts"></script>
   </body>

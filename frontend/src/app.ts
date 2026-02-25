@@ -1,5 +1,5 @@
 import { ApiClient, ApiError, type ApiRequestEvent } from "./backend_client";
-import { CanvasEngine } from "./canvas_engine";
+import { CanvasEngine, type NodeRenderMode } from "./canvas_engine";
 import { MaskLayer } from "./make_layer";
 import { computeLabelLocalApprox } from "./modules/label_local";
 import type { Label, Scene } from "./modules/types";
@@ -229,6 +229,121 @@ export async function bootstrapApp(): Promise<void> {
     maskLayer.drawOverlay(maskCtx, 0.45);
   };
 
+  const applyNodeRenderSettings = (): void => {
+    const mode = byId<HTMLSelectElement>("node-render-mode").value as NodeRenderMode;
+    const strokeScale = toNum(byId<HTMLInputElement>("node-stroke-scale").value, 1);
+    const showLabel = byId<HTMLInputElement>("node-show-type").checked;
+    engine.setNodeRenderOptions({ mode, strokeScale, showTypeLabelOnSymbol: showLabel });
+
+    try {
+      localStorage.setItem("cdt.nodeRenderMode", mode);
+      localStorage.setItem("cdt.nodeStrokeScale", String(strokeScale));
+      localStorage.setItem("cdt.nodeShowType", String(showLabel));
+    } catch {
+      // ignore
+    }
+  };
+
+  const initNodeRenderSettings = (): void => {
+    const modeEl = byId<HTMLSelectElement>("node-render-mode");
+    const strokeEl = byId<HTMLInputElement>("node-stroke-scale");
+    const strokeText = byId<HTMLSpanElement>("node-stroke-scale-text");
+    const showTypeEl = byId<HTMLInputElement>("node-show-type");
+
+    try {
+      const mode = localStorage.getItem("cdt.nodeRenderMode");
+      if (mode === "symbol" || mode === "box") modeEl.value = mode;
+      const stroke = Number(localStorage.getItem("cdt.nodeStrokeScale"));
+      if (Number.isFinite(stroke)) strokeEl.value = String(Math.max(0.5, Math.min(3, stroke)));
+      const showType = localStorage.getItem("cdt.nodeShowType");
+      if (showType === "true" || showType === "false") showTypeEl.checked = showType === "true";
+    } catch {
+      // ignore
+    }
+
+    strokeText.textContent = Number(strokeEl.value).toFixed(1);
+    applyNodeRenderSettings();
+    modeEl.addEventListener("change", () => {
+      applyNodeRenderSettings();
+      render();
+      log(`器件样式已切换为：${modeEl.value === "box" ? "方框" : "电路符号"}`);
+    });
+    strokeEl.addEventListener("input", () => {
+      strokeText.textContent = Number(strokeEl.value).toFixed(1);
+      applyNodeRenderSettings();
+      render();
+    });
+    showTypeEl.addEventListener("change", () => {
+      applyNodeRenderSettings();
+      render();
+    });
+  };
+
+  const initCustomSymbolUpload = (): void => {
+    const typeEl = byId<HTMLSelectElement>("custom-symbol-type");
+    const statusEl = byId<HTMLDivElement>("custom-symbol-status");
+    const fileEl = byId<HTMLInputElement>("file-custom-symbol");
+
+    const types = Object.keys(vocab?.types ?? {}).sort();
+    typeEl.innerHTML = "";
+    for (const t of types) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      typeEl.appendChild(opt);
+    }
+
+    const refreshStatus = () => {
+      const t = typeEl.value;
+      statusEl.textContent = engine.hasCustomSymbol(t)
+        ? `已为 ${t} 配置自定义符号（优先于内置图形）`
+        : `当前 ${t} 使用内置符号`;
+    };
+
+    const readFileAsDataUrl = (file: File): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+        reader.readAsDataURL(file);
+      });
+
+    bindOptionalClick("btn-upload-custom-symbol", () => fileEl.click(), log);
+    bindOptionalClick("btn-clear-custom-symbol", () => {
+      const t = typeEl.value;
+      engine.clearCustomSymbol(t);
+      refreshStatus();
+      render();
+      log(`已移除 ${t} 的自定义符号`);
+    }, log);
+
+    fileEl.addEventListener("change", async () => {
+      const file = fileEl.files?.[0];
+      if (!file) return;
+      const t = typeEl.value;
+      try {
+        const src = await readFileAsDataUrl(file);
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error("图片解码失败"));
+          image.src = src;
+        });
+        engine.setCustomSymbol(t, img);
+        refreshStatus();
+        render();
+        log(`已为 ${t} 应用自定义符号：${file.name}`);
+      } catch (err) {
+        logError(err, `上传 ${t} 自定义符号失败`);
+      } finally {
+        fileEl.value = "";
+      }
+    });
+
+    typeEl.addEventListener("change", refreshStatus);
+    refreshStatus();
+  };
+
   const syncInteractionCanvas = (): void => {
     const isCircuitMode = state.mode === "circuit";
     uiCanvas.style.pointerEvents = "auto";
@@ -275,6 +390,8 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   bindPalette(engine, render, log, vocab);
+  initNodeRenderSettings();
+  initCustomSymbolUpload();
   bindMaskPaint(
     uiCanvas,
     maskLayer,
@@ -863,6 +980,29 @@ function bindCircuitInteractions(opts: {
       log(`已删除连线：${sel.netId}`);
     }
   });
+
+  uiCanvas.addEventListener(
+    "wheel",
+    (ev) => {
+      if (!canEdit()) return;
+      const sel = engine.getSelection();
+      if (!sel?.nodeId) return;
+      const node = engine.getNodeById(sel.nodeId);
+      if (!node) return;
+
+      ev.preventDefault();
+      if (ev.altKey) {
+        const step = ev.deltaY < 0 ? 10 : -10;
+        engine.rotateNode(node.id, Number(node.rot ?? 0) + step);
+      } else {
+        const scaleStep = ev.deltaY < 0 ? 1.08 : 0.92;
+        engine.scaleNode(node.id, Number(node.scale ?? 1) * scaleStep);
+      }
+      onChange();
+      redrawAll();
+    },
+    { passive: false }
+  );
 }
 
 function bindMaskPaint(
