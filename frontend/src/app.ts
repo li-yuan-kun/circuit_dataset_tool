@@ -1270,6 +1270,12 @@ function initComponentTemplateEditor(opts: {
   const pinYEl = byId<HTMLInputElement>("component-pin-y");
   const newPinEl = byId<HTMLInputElement>("component-new-pin-name");
   const statusEl = byId<HTMLDivElement>("component-template-status");
+  const previewCanvas = byId<HTMLCanvasElement>("component-template-preview");
+  const previewCtx = previewCanvas.getContext("2d");
+  const previewEngine = new CanvasEngine({
+    resolution: { w: previewCanvas.width, h: previewCanvas.height },
+    vocab,
+  });
 
   const ensureTypeConfig = (type: string): any => {
     if (!vocab.types || typeof vocab.types !== "object") vocab.types = {};
@@ -1325,6 +1331,7 @@ function initComponentTemplateEditor(opts: {
     const pin = cfg.pins[pinNameEl.value] ?? cfg.pins[pins[0]];
     pinXEl.value = String(Math.round(Number(pin?.x ?? 0)));
     pinYEl.value = String(Math.round(Number(pin?.y ?? 0)));
+    redrawTemplatePreview();
   };
 
   const applyAndRender = (message: string) => {
@@ -1334,6 +1341,17 @@ function initComponentTemplateEditor(opts: {
     render();
     statusEl.textContent = message;
     log(message);
+    redrawTemplatePreview();
+  };
+
+  const redrawTemplatePreview = () => {
+    if (!previewCtx) return;
+    previewEngine.clear();
+    const type = typeEl.value;
+    if (type) {
+      previewEngine.addNode(type, { x: previewCanvas.width / 2, y: previewCanvas.height / 2 });
+    }
+    previewEngine.draw(previewCtx);
   };
 
   bindOptionalClick("btn-apply-component-size", () => {
@@ -1378,6 +1396,7 @@ function initComponentTemplateEditor(opts: {
 
   refreshTypeList();
   refreshPinList();
+  redrawTemplatePreview();
 }
 
 function validateVocab(vocab: any): string | null {
