@@ -942,6 +942,7 @@ export async function bootstrapApp(): Promise<void> {
       let nextIndex = 0;
       let succeeded = 0;
       let failed = 0;
+      const savedItems: Array<{ sampleId: string; savedPaths: Record<string, any> }> = [];
 
       const worker = async (): Promise<void> => {
         while (true) {
@@ -965,13 +966,14 @@ export async function bootstrapApp(): Promise<void> {
             const labelJson = makeLabelJson(labelRes.label);
             const imagePng = await exportCanvasPNG(circuitCanvas);
 
-            await getApi().saveSampleMultipart({
+            const saveRes = await getApi().saveSampleMultipart({
               imagePng,
               maskPng: maskRes.maskPngBlob,
               sceneJson,
               labelJson,
               sampleId,
             });
+            savedItems.push({ sampleId: saveRes.sample_id, savedPaths: saveRes.saved_paths ?? {} });
           };
 
           try {
@@ -989,6 +991,11 @@ export async function bootstrapApp(): Promise<void> {
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
       setStatus(`MVP批处理完成 | 成功=${succeeded} | 失败=${failed}`);
       log(`MVP 批处理完成：成功=${succeeded}，失败=${failed}`);
+      if (savedItems.length > 0) {
+        const first = savedItems[0];
+        log(`MVP 保存位置示例：sample_id=${first.sampleId}，image=${first.savedPaths?.image ?? "(未知)"}`);
+      }
+      log(`MVP 累计已保存 ${savedItems.length} 条样本到后端 DATASET_ROOT。`);
     };
 
     try {
@@ -1024,6 +1031,9 @@ export async function bootstrapApp(): Promise<void> {
       if (err instanceof ApiError && err.status === 404) {
         log("⚠️ Jobs 接口返回 NotFound，自动回退到前端 MVP 批处理流程");
         setStatus("Jobs 接口不可用，已回退到 MVP 批处理...");
+        if (payload.zip) {
+          log("ℹ️ 当前为 MVP 回退流程：不生成 jobs zip；样本会直接保存到后端 DATASET_ROOT。");
+        }
         try {
           await runBatchMvp();
           return;
