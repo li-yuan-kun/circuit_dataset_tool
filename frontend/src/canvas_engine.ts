@@ -156,21 +156,18 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
-  const bodyLeft = left + Math.max(6, w * 0.08);
-  const bodyRight = Math.min(right - 8, bodyLeft + bodyW);
-  const radius = (bottom - top) / 2;
+  const bubbleR = 5.5;
+  const radius = h * 0.5;
+  const arcRight = bubble ? right - bubbleR * 2 : right;
+  const bodyRight = arcRight - radius;
+  const bodyLeft = left + Math.max(14, w * 0.2);
   const centerY = 0;
 
-  const bubbleR = 5.5;
-  const outStart = bubble ? right - (bubbleR * 2 + 2) : right - 2;
   ctx.beginPath();
   ctx.moveTo(left, -h * 0.22);
   ctx.lineTo(bodyLeft, -h * 0.22);
   ctx.moveTo(left, h * 0.22);
   ctx.lineTo(bodyLeft, h * 0.22);
-  ctx.moveTo(outStart, 0);
-  ctx.lineTo(right, 0);
   ctx.stroke();
 
   ctx.beginPath();
@@ -183,7 +180,7 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
 
   if (bubble) {
     ctx.beginPath();
-    ctx.arc(outStart + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.arc(right - bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -194,9 +191,9 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const top = -h / 2;
   const bottom = h / 2;
   const bubbleR = 5.5;
-  const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
-  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
-  const inJoinX = left + Math.max(6, w * 0.08);
+  const gateOutX = opts.bubble ? right - bubbleR * 2 : right;
+  const bodyW = Math.max(22, Math.min(w, h) * 0.7);
+  const inJoinX = left + Math.max(14, w * 0.2);
 
   // leads
   ctx.beginPath();
@@ -204,17 +201,15 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.lineTo(inJoinX, -h * 0.22);
   ctx.moveTo(left, h * 0.22);
   ctx.lineTo(inJoinX, h * 0.22);
-  ctx.moveTo(outX, 0);
-  ctx.lineTo(right, 0);
   ctx.stroke();
 
   // ANSI-like OR body
   ctx.beginPath();
   ctx.moveTo(inJoinX, top);
-  const bulgeX = inJoinX + bodyW * 0.58;
-  const backX = inJoinX + bodyW * 0.28;
+  const bulgeX = inJoinX + bodyW * 0.7;
+  const backX = inJoinX + bodyW * 0.32;
   ctx.quadraticCurveTo(backX, 0, inJoinX, bottom);
-  ctx.quadraticCurveTo(bulgeX, bottom, outX, 0);
+  ctx.quadraticCurveTo(bulgeX, bottom, gateOutX, 0);
   ctx.quadraticCurveTo(bulgeX, top, inJoinX, top);
   ctx.stroke();
 
@@ -227,7 +222,7 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
 
   if (opts.bubble) {
     ctx.beginPath();
-    ctx.arc(outX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.arc(gateOutX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -657,7 +652,7 @@ export class CanvasEngine {
       const { w, h } = safeSizeFromVocab(this.vocab, n.type);
       const bw = w * s;
       const bh = h * s;
-      const pinRadius = Math.max(2.5, Math.min(8, Math.min(bw, bh) * 0.22));
+      const pinRadius = Math.max(1.6, Math.min(4.5, Math.min(bw, bh) * 0.22));
 
       for (const pin of pins) {
         // pin.x/y 约定为相对组件中心的局部坐标
@@ -1098,12 +1093,12 @@ export class CanvasEngine {
       // pins
       const pins = iterPinsFromVocab(this.vocab, n.type);
       if (pins.length) {
-        const pinOuter = Math.max(1.8, Math.min(5, Math.min(bw, bh) * 0.14));
-        const pinInner = Math.max(1.1, pinOuter * 0.68);
+        const pinOuter = Math.max(0.8, Math.min(3.2, Math.min(bw, bh) * 0.14));
+        const pinInner = Math.max(0.5, pinOuter * 0.68);
         ctx.fillStyle = "#111";
         for (const p of pins) {
           ctx.strokeStyle = "#fff";
-          ctx.lineWidth = Math.max(0.8, pinOuter * 0.4);
+          ctx.lineWidth = Math.max(0.5, pinOuter * 0.4);
           ctx.beginPath();
           ctx.arc(p.x * s, p.y * s, pinOuter, 0, Math.PI * 2);
           ctx.stroke();
