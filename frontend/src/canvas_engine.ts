@@ -156,7 +156,7 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyW = Math.max(24, Math.min(w, h) * 0.86);
+  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
   const bodyLeft = left + Math.max(6, w * 0.08);
   const bodyRight = Math.min(right - 8, bodyLeft + bodyW);
   const radius = (bottom - top) / 2;
@@ -195,7 +195,7 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const bottom = h / 2;
   const bubbleR = 5.5;
   const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
-  const bodyW = Math.max(24, Math.min(w, h) * 0.86);
+  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
   const inJoinX = left + Math.max(6, w * 0.08);
 
   // leads
