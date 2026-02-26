@@ -164,9 +164,39 @@ export async function bootstrapApp(): Promise<void> {
   };
 
   const resolution = { w: circuitCanvas.width, h: circuitCanvas.height };
+  const badgeResolutionEl = byId<HTMLSpanElement>("badge-resolution");
+  const canvasWidthEl = byId<HTMLInputElement>("canvas-width");
+  const canvasHeightEl = byId<HTMLInputElement>("canvas-height");
+  const applyCanvasSizeBtn = byId<HTMLButtonElement>("btn-apply-canvas-size");
   const vocab = await loadVocab(log);
   const engine = new CanvasEngine({ resolution, vocab });
   const maskLayer = new MaskLayer({ resolution });
+
+  const applyCanvasResolution = (w: number, h: number): void => {
+    const width = Math.max(128, Math.min(4096, Math.floor(Number(w) || resolution.w)));
+    const height = Math.max(128, Math.min(4096, Math.floor(Number(h) || resolution.h)));
+    circuitCanvas.width = width;
+    circuitCanvas.height = height;
+    uiCanvas.width = width;
+    uiCanvas.height = height;
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+
+    resolution.w = width;
+    resolution.h = height;
+    engine.setResolution({ w: width, h: height });
+    maskLayer.resize({ w: width, h: height });
+    badgeResolutionEl.textContent = `${width}×${height}`;
+    canvasWidthEl.value = String(width);
+    canvasHeightEl.value = String(height);
+  };
+
+  applyCanvasResolution(resolution.w, resolution.h);
+  applyCanvasSizeBtn.addEventListener("click", () => {
+    applyCanvasResolution(Number(canvasWidthEl.value), Number(canvasHeightEl.value));
+    render();
+    log(`已应用画布尺寸：${resolution.w}×${resolution.h}`);
+  });
 
   const state: AppState = {
     mode: "circuit",

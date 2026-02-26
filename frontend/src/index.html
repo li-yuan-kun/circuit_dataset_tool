@@ -301,6 +301,15 @@
         <div class="workspace__header">
           <div class="workspace__meta">
             <span class="badge" id="badge-resolution">1024×1024</span>
+            <label class="field field--inline" title="可动态调整画布分辨率">
+              <span class="field__label">W</span>
+              <input id="canvas-width" class="input input--mono" type="number" min="128" max="4096" step="1" value="1024" style="width:88px;" />
+            </label>
+            <label class="field field--inline" title="可动态调整画布分辨率">
+              <span class="field__label">H</span>
+              <input id="canvas-height" class="input input--mono" type="number" min="128" max="4096" step="1" value="1024" style="width:88px;" />
+            </label>
+            <button id="btn-apply-canvas-size" type="button" class="btn">应用画布尺寸</button>
             <span class="badge" id="badge-mode">MODE: CIRCUIT</span>
             <span class="badge" id="badge-selection">SELECTION: -</span>
           </div>

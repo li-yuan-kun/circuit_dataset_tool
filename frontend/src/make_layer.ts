@@ -14,9 +14,9 @@ function lerp(a: number, b: number, t: number) {
 }
 
 export class MaskLayer {
-  private readonly resolution: Resolution;
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
+  private resolution: Resolution;
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
 
   private brushWidth = 24;
   private hardness = 0.7; // [0..1]
@@ -36,6 +36,22 @@ export class MaskLayer {
     this.ctx = ctx;
 
     this.clear();
+    this.setBrush(this.brushWidth, this.hardness);
+  }
+
+
+  resize(resolution: Resolution): void {
+    const w = Math.max(1, Math.floor(Number(resolution?.w ?? this.resolution.w)));
+    const h = Math.max(1, Math.floor(Number(resolution?.h ?? this.resolution.h)));
+
+    const oldCanvas = this.canvas;
+    this.resolution = { w, h };
+    this.canvas = makeOffscreenCanvas(w, h);
+    const nextCtx = this.canvas.getContext("2d");
+    if (!nextCtx) throw new Error("MaskLayer: cannot get 2d context after resize");
+    this.ctx = nextCtx;
+    this.ctx.clearRect(0, 0, w, h);
+    this.ctx.drawImage(oldCanvas, 0, 0, w, h);
     this.setBrush(this.brushWidth, this.hardness);
   }
 
@@ -158,16 +174,16 @@ export class MaskLayer {
     const W = this.resolution.w;
     const H = this.resolution.h;
 
-    // 将 mask（白色 alpha）tint 成红色半透明叠加
+    // 将 mask（白色 alpha）叠加为黑色半透明
     ctx.save();
     ctx.globalAlpha = a;
 
     // 先把 mask alpha 画上去
     ctx.drawImage(this.canvas, 0, 0);
 
-    // 再用 source-in 填充红色：只在 mask 有 alpha 的地方着色
+    // 再用 source-in 填充黑色：只在 mask 有 alpha 的地方着色
     ctx.globalCompositeOperation = "source-in";
-    ctx.fillStyle = "rgba(255,0,0,1)";
+    ctx.fillStyle = "rgba(0,0,0,1)";
     ctx.fillRect(0, 0, W, H);
 
     ctx.restore();
