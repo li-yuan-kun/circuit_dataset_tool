@@ -82,12 +82,12 @@ function rotateXY(x: number, y: number, rad: number): { x: number; y: number } {
 function drawResistorSymbol(ctx: CanvasRenderingContext2D, w: number): void {
   const start = -w / 2;
   const end = w / 2;
-  const lead = Math.min(18, w * 0.2);
-  const bodyStart = start + lead;
-  const bodyEnd = end - lead;
+  const bodyW = Math.min(w, Math.max(30, w * 0.62));
+  const bodyStart = -bodyW / 2;
+  const bodyEnd = bodyW / 2;
   const zigCount = 7;
   const step = (bodyEnd - bodyStart) / zigCount;
-  const amp = Math.max(7, Math.min(12, w * 0.08));
+  const amp = Math.max(6, Math.min(11, bodyW * 0.16));
 
   ctx.beginPath();
   ctx.moveTo(start, 0);
@@ -104,10 +104,11 @@ function drawResistorSymbol(ctx: CanvasRenderingContext2D, w: number): void {
 function drawCapacitorSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const start = -w / 2;
   const end = w / 2;
-  const plateGap = Math.min(16, w * 0.2);
+  const bodyW = Math.min(w, Math.max(30, Math.min(w, h) * 0.9));
+  const plateGap = Math.max(8, bodyW * 0.14);
   const leftPlateX = -plateGap;
   const rightPlateX = plateGap;
-  const plateHalf = Math.max(14, h * 0.42);
+  const plateHalf = Math.max(14, Math.min(h, bodyW) * 0.42);
 
   ctx.beginPath();
   ctx.moveTo(start, 0);
@@ -126,9 +127,10 @@ function drawNotSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): voi
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const tipX = right - 16;
+  const bodyW = Math.min(w, h * 0.95);
+  const tipX = bodyW / 2 - 8;
   const bubbleR = 5.5;
-  const bodyLeft = left + 16;
+  const bodyLeft = -bodyW / 2;
 
   ctx.beginPath();
   ctx.moveTo(left, 0);
@@ -154,8 +156,9 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyLeft = left + 16;
-  const bodyRight = right - 18;
+  const bodyW = Math.min(w, h);
+  const bodyLeft = -bodyW / 2;
+  const bodyRight = bodyW / 2 - 2;
   const radius = (bottom - top) / 2;
   const centerY = 0;
 
@@ -192,7 +195,8 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const bottom = h / 2;
   const bubbleR = 5.5;
   const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
-  const inJoinX = left + 18;
+  const bodyW = Math.min(w, h);
+  const inJoinX = -bodyW / 2 + 8;
 
   // leads
   ctx.beginPath();
@@ -207,15 +211,15 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   // ANSI-like OR body
   ctx.beginPath();
   ctx.moveTo(inJoinX, top);
-  ctx.quadraticCurveTo(left + 46, 0, inJoinX, bottom);
-  ctx.quadraticCurveTo(right - 30, bottom, outX, 0);
-  ctx.quadraticCurveTo(right - 30, top, inJoinX, top);
+  ctx.quadraticCurveTo(-bodyW * 0.08, 0, inJoinX, bottom);
+  ctx.quadraticCurveTo(bodyW * 0.34, bottom, outX, 0);
+  ctx.quadraticCurveTo(bodyW * 0.34, top, inJoinX, top);
   ctx.stroke();
 
   if (opts.xor) {
     ctx.beginPath();
-    ctx.moveTo(left + 10, top);
-    ctx.quadraticCurveTo(left + 38, 0, left + 10, bottom);
+    ctx.moveTo(inJoinX - 8, top);
+    ctx.quadraticCurveTo(-bodyW * 0.16, 0, inJoinX - 8, bottom);
     ctx.stroke();
   }
 
@@ -231,8 +235,9 @@ function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyLeft = left + 18;
-  const bodyRight = right - 14;
+  const bodyW = Math.min(w, h);
+  const bodyLeft = -bodyW / 2 + 4;
+  const bodyRight = bodyW / 2 - 4;
 
   ctx.beginPath();
   ctx.moveTo(left, -h * 0.23);
