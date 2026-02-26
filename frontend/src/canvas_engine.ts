@@ -640,7 +640,6 @@ export class CanvasEngine {
   }
 
   hitTestPin(p: Point): Endpoint | null {
-    const pinRadius = 8;
     const nodes = this.scene.nodes;
 
     for (let i = nodes.length - 1; i >= 0; i--) {
@@ -650,6 +649,10 @@ export class CanvasEngine {
 
       const rad = rotToRad(n.rot);
       const s = Number(n.scale ?? 1);
+      const { w, h } = safeSizeFromVocab(this.vocab, n.type);
+      const bw = w * s;
+      const bh = h * s;
+      const pinRadius = Math.max(2.5, Math.min(8, Math.min(bw, bh) * 0.22));
 
       for (const pin of pins) {
         // pin.x/y 约定为相对组件中心的局部坐标
@@ -1090,15 +1093,17 @@ export class CanvasEngine {
       // pins
       const pins = iterPinsFromVocab(this.vocab, n.type);
       if (pins.length) {
+        const pinOuter = Math.max(1.8, Math.min(5, Math.min(bw, bh) * 0.14));
+        const pinInner = Math.max(1.1, pinOuter * 0.68);
         ctx.fillStyle = "#111";
         for (const p of pins) {
           ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 2;
+          ctx.lineWidth = Math.max(0.8, pinOuter * 0.4);
           ctx.beginPath();
-          ctx.arc(p.x * s, p.y * s, 5, 0, Math.PI * 2);
+          ctx.arc(p.x * s, p.y * s, pinOuter, 0, Math.PI * 2);
           ctx.stroke();
           ctx.beginPath();
-          ctx.arc(p.x * s, p.y * s, 3.5, 0, Math.PI * 2);
+          ctx.arc(p.x * s, p.y * s, pinInner, 0, Math.PI * 2);
           ctx.fill();
         }
       }
