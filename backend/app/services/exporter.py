@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from .storage import Storage
 
 
@@ -42,6 +44,32 @@ def _stable_json_bytes(obj: Any) -> bytes:
 
 def _sha256_json(obj: Any) -> str:
     return _sha256_bytes(_stable_json_bytes(obj))
+
+
+
+
+def _compose_image_with_mask(image_bytes: bytes, mask_bytes: bytes) -> Optional[bytes]:
+    try:
+        import io
+
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        mask = Image.open(io.BytesIO(mask_bytes)).convert("L")
+        if image.size != mask.size:
+            mask = mask.resize(image.size)
+
+        arr = np.asarray(image, dtype=np.uint8).copy()
+        mask_arr = np.asarray(mask, dtype=np.uint8) > 0
+        arr[mask_arr, 0] = 255
+        arr[mask_arr, 1] = (arr[mask_arr, 1] * 0.35).astype(np.uint8)
+        arr[mask_arr, 2] = (arr[mask_arr, 2] * 0.35).astype(np.uint8)
+
+        out = io.BytesIO()
+        Image.fromarray(arr, mode="RGB").save(out, format="PNG")
+        return out.getvalue()
+    except Exception:
+        return None
 
 
 def allocate_sample_id(storage: Storage, *, prefix: str = "sample_", width: int = 6) -> str:
