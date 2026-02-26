@@ -898,23 +898,100 @@ export async function bootstrapApp(): Promise<void> {
       statusEl.textContent = msg;
     };
 
-    try {
-      const payload = {
-        job_type: "batch_dataset",
-        scene: syncScene(),
-        n: Math.max(1, Math.floor(toNum(byId<HTMLInputElement>("batch-n").value, 10))),
-        seed_start: Math.floor(toNum(byId<HTMLInputElement>("batch-seed-start").value, 1)),
-        use_backend_shuffle: byId<HTMLInputElement>("batch-use-shuffle").checked,
-        mask_strategy: byId<HTMLSelectElement>("batch-mask-strategy").value,
-        mask_params: {
-          ratio: toNum(byId<HTMLInputElement>("batch-mask-ratio").value, 0.35),
-          scale: toNum(byId<HTMLInputElement>("batch-mask-scale").value, 64),
-        },
-        occ_threshold: toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9),
-        function: byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value,
-        zip: byId<HTMLInputElement>("batch-zip").checked,
+    const n = Math.max(1, Math.floor(toNum(byId<HTMLInputElement>("batch-n").value, 10)));
+    const seedStart = Math.floor(toNum(byId<HTMLInputElement>("batch-seed-start").value, 1));
+    const useBackendShuffle = byId<HTMLInputElement>("batch-use-shuffle").checked;
+    const maskStrategy = byId<HTMLSelectElement>("batch-mask-strategy").value;
+    const maskParams = {
+      ratio: toNum(byId<HTMLInputElement>("batch-mask-ratio").value, 0.35),
+      scale: toNum(byId<HTMLInputElement>("batch-mask-scale").value, 64),
+    };
+    const occThreshold = toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9);
+    const functionName = byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value;
+
+    const payload = {
+      job_type: "batch_dataset",
+      scene: syncScene(),
+      n,
+      seed_start: seedStart,
+      use_backend_shuffle: useBackendShuffle,
+      mask_strategy: maskStrategy,
+      mask_params: maskParams,
+      occ_threshold: occThreshold,
+      function: functionName,
+      zip: byId<HTMLInputElement>("batch-zip").checked,
+    };
+
+    const requestWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delayMs = 600): Promise<T> => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+          return await fn();
+        } catch (error) {
+          lastError = error;
+          if (attempt >= retries) break;
+          await sleepMs(delayMs * (attempt + 1));
+        }
+      }
+      throw lastError;
+    };
+
+    const runBatchMvp = async (): Promise<void> => {
+      const baseScene = syncScene();
+      const concurrency = 2;
+      let nextIndex = 0;
+      let succeeded = 0;
+      let failed = 0;
+
+      const worker = async (): Promise<void> => {
+        while (true) {
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= n) return;
+
+          const seed = seedStart + index;
+          const sampleId = `batch_mvp_${seed}_${index}`;
+          const processOne = async (): Promise<void> => {
+            let sceneItem = baseScene;
+            if (useBackendShuffle) {
+              const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
+              sceneItem = shuffled.scene_shuffled ?? baseScene;
+            }
+
+            const maskRes = await getApi().generateMask(sceneItem, maskStrategy, { ...maskParams, seed });
+            const labelRes = await getApi().computeLabel(sceneItem, maskRes.maskPngBlob, occThreshold, functionName);
+
+            const sceneJson = makeSceneJson(sceneItem);
+            const labelJson = makeLabelJson(labelRes.label);
+            const imagePng = await exportCanvasPNG(circuitCanvas);
+
+            await getApi().saveSampleMultipart({
+              imagePng,
+              maskPng: maskRes.maskPngBlob,
+              sceneJson,
+              labelJson,
+              sampleId,
+            });
+          };
+
+          try {
+            await requestWithRetry(processOne, 2, 700);
+            succeeded += 1;
+          } catch (error) {
+            failed += 1;
+            log(`⚠️ MVP 批处理样本失败(index=${index}, seed=${seed})：${userFacingError(error, "处理失败")}`);
+          }
+          const progress = Math.round(((succeeded + failed) / Math.max(n, 1)) * 100);
+          setStatus(`MVP串行批处理中 | 进度=${progress}% | 成功=${succeeded} | 失败=${failed}`);
+        }
       };
 
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      setStatus(`MVP批处理完成 | 成功=${succeeded} | 失败=${failed}`);
+      log(`MVP 批处理完成：成功=${succeeded}，失败=${failed}`);
+    };
+
+    try {
       const { job_id } = await getApi().submitJob(payload);
       log(`批处理任务已提交，job_id=${job_id}`);
       setStatus(`任务 ${job_id} 已提交，等待执行...`);
@@ -944,6 +1021,18 @@ export async function bootstrapApp(): Promise<void> {
       setStatus("任务轮询超时，请稍后用 job_id 手动查询。");
       log("⚠️ 批处理轮询超时，请稍后重试查询任务状态");
     } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        log("⚠️ Jobs 接口返回 NotFound，自动回退到前端 MVP 批处理流程");
+        setStatus("Jobs 接口不可用，已回退到 MVP 批处理...");
+        try {
+          await runBatchMvp();
+          return;
+        } catch (mvpError) {
+          logError(mvpError, "MVP 批处理失败");
+          setStatus("MVP 批处理失败，请查看日志。");
+          return;
+        }
+      }
       logError(err, "批处理任务提交/查询失败");
       setStatus("批处理失败，请查看日志。");
     }
