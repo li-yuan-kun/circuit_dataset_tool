@@ -23,6 +23,8 @@ type AppState = {
   maskBlob: Blob | null;
 };
 
+type LabelComputeTrigger = "manual" | "auto";
+
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 
 function normalizeAndValidateBaseUrl(raw: string): { valid: boolean; normalized: string } {
@@ -126,6 +128,7 @@ export async function bootstrapApp(): Promise<void> {
   const statusShortEl = byId<HTMLDivElement>("status-short");
   const requestSummaryEl = byId<HTMLDivElement>("request-summary");
   const shuffleModeStatusEl = byId<HTMLDivElement>("shuffle-mode-status");
+  const labelAutoComputeEl = byId<HTMLInputElement>("label-auto-compute");
 
   const circuitCtx = circuitCanvas.getContext("2d");
   const maskCtx = maskCanvas.getContext("2d");
@@ -418,6 +421,117 @@ export async function bootstrapApp(): Promise<void> {
       : "Shuffle 模式：当前使用本地 shuffle";
   };
 
+  const loadAutoComputePreference = (): boolean => {
+    try {
+      const stored = localStorage.getItem("cdt.labelAutoCompute");
+      return stored !== "false";
+    } catch {
+      return true;
+    }
+  };
+
+  labelAutoComputeEl.checked = loadAutoComputePreference();
+  labelAutoComputeEl.addEventListener("change", () => {
+    const enabled = labelAutoComputeEl.checked;
+    try {
+      localStorage.setItem("cdt.labelAutoCompute", String(enabled));
+    } catch {
+      // ignore
+    }
+    log(enabled ? "已开启自动计算 Label" : "已关闭自动计算 Label（可手动点击“计算 Label”）");
+  });
+
+  let autoComputeTimer: number | null = null;
+  let queuedAutoComputeReason: string | null = null;
+  let autoComputeRunning = false;
+
+  const computeLabelAndRefresh = async (reason: string, trigger: LabelComputeTrigger = "manual"): Promise<void> => {
+    const selectedMode = byId<HTMLSelectElement>("label-compute-mode").value as LabelComputeMode;
+    state.labelComputeMode = selectedMode === "backend_precise" ? "backend_precise" : "frontend_fast";
+
+    const endpoint = "/label/compute";
+    const startedAt = performance.now();
+    const functionValue = byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value;
+    const occThreshold = toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9);
+    const isAuto = trigger === "auto";
+
+    const computeLocal = (fallbackReason?: string): void => {
+      const label = computeLabelLocalApprox({
+        scene: syncScene(),
+        maskImageData: maskLayer.getMaskImageData(),
+        occThreshold,
+        functionName: functionValue,
+      });
+      state.label = label;
+      refreshLabelUi();
+      updateRequestSummary("frontend://label/compute-local", performance.now() - startedAt, "APPROX");
+
+      if (fallbackReason) {
+        const degradedHint = isAuto ? "自动计算失败/已降级近似结果" : "后端失败/已降级近似结果";
+        statusShortEl.textContent = `${degradedHint}（${reason}）`;
+        log(`⚠️ ${fallbackReason}，已使用前端近似结果（${reason}）`);
+      } else {
+        log(isAuto ? `自动计算成功（前端快速，近似结果）：${reason}` : "Label 计算成功（前端快速，近似结果）");
+      }
+    };
+
+    if (state.labelComputeMode === "frontend_fast") {
+      computeLocal();
+      return;
+    }
+
+    try {
+      const maskBlob = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
+      const backendStartedAt = performance.now();
+      const { label } = await getApi().computeLabel(syncScene(), maskBlob, occThreshold, functionValue);
+      state.label = label;
+      refreshLabelUi();
+      updateRequestSummary(endpoint, performance.now() - backendStartedAt, "HTTP 200");
+      log(isAuto ? `自动计算成功（后端精确）：${reason}` : "Label 计算成功");
+    } catch (err) {
+      const elapsed = performance.now() - startedAt;
+      computeLocal("后端精确计算失败");
+      if (isTimeoutOrAbortError(err)) {
+        updateRequestSummary(endpoint, elapsed, "TIMEOUT/ABORT");
+        log("❌ 计算 Label 超时或请求被取消，请延长超时或降低分辨率/复杂度后重试");
+      } else if (err instanceof ApiError && err.code === "MASK_DECODE_ERROR") {
+        updateRequestSummary(endpoint, elapsed, `HTTP ${err.status} / ${err.code}`);
+        log("❌ 计算 Label 失败：请检查 mask 尺寸是否与 scene.meta.resolution 完全一致");
+      } else if (err instanceof ApiError) {
+        updateRequestSummary(endpoint, elapsed, `HTTP ${err.status} / ${err.code}`);
+        log(`❌ 计算 Label 失败：${err.code} - ${err.message}`);
+      } else {
+        updateRequestSummary(endpoint, elapsed, "UNKNOWN_ERROR");
+        logError(err, "计算 Label 失败");
+      }
+      console.error(err);
+    }
+  };
+
+  const scheduleAutoCompute = (reason: string): void => {
+    if (!labelAutoComputeEl.checked) return;
+    queuedAutoComputeReason = reason;
+    if (autoComputeTimer !== null) {
+      window.clearTimeout(autoComputeTimer);
+    }
+    autoComputeTimer = window.setTimeout(async () => {
+      autoComputeTimer = null;
+      if (autoComputeRunning) return;
+      const queuedReason = queuedAutoComputeReason;
+      queuedAutoComputeReason = null;
+      if (!queuedReason) return;
+      autoComputeRunning = true;
+      try {
+        await computeLabelAndRefresh(queuedReason, "auto");
+      } finally {
+        autoComputeRunning = false;
+        if (queuedAutoComputeReason) {
+          scheduleAutoCompute(queuedAutoComputeReason);
+        }
+      }
+    }, 500);
+  };
+
   const shuffleUseBackendEl = byId<HTMLInputElement>("shuffle-use-backend");
   const loadShuffleBackendPreference = (): boolean => {
     try {
@@ -449,6 +563,7 @@ export async function bootstrapApp(): Promise<void> {
     () => state.mode === "mask",
     () => {
       state.maskBlob = null;
+      scheduleAutoCompute("Mask 涂抹变更");
     },
     render,
   );
@@ -491,7 +606,10 @@ export async function bootstrapApp(): Promise<void> {
     uiCanvas,
     canEdit: () => state.mode === "circuit",
     render,
-    onChange: syncScene,
+    onChange: () => {
+      syncScene();
+      scheduleAutoCompute("电路编辑变更");
+    },
     log,
   });
   bindPresets(engine, vocab, () => {
@@ -662,6 +780,7 @@ export async function bootstrapApp(): Promise<void> {
       state.maskBlob = maskPngBlob;
       render();
       log("已调用后端自动生成 Mask");
+      scheduleAutoCompute("自动生成 Mask 成功");
     } catch (err) {
       logError(err, "自动生成 Mask 失败，请检查后端地址和场景内容");
     }
@@ -680,57 +799,7 @@ export async function bootstrapApp(): Promise<void> {
   });
 
   byId<HTMLButtonElement>("btn-compute-label").addEventListener("click", async () => {
-    const selectedMode = byId<HTMLSelectElement>("label-compute-mode").value as LabelComputeMode;
-    state.labelComputeMode = selectedMode === "backend_precise" ? "backend_precise" : "frontend_fast";
-
-    const endpoint = "/label/compute";
-    const startedAt = performance.now();
-    const functionValue = byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value;
-    const occThreshold = toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9);
-    const computeLocal = (reason?: string): void => {
-      const label = computeLabelLocalApprox({
-        scene: syncScene(),
-        maskImageData: maskLayer.getMaskImageData(),
-        occThreshold,
-        functionName: functionValue,
-      });
-      state.label = label;
-      refreshLabelUi();
-      updateRequestSummary("frontend://label/compute-local", performance.now() - startedAt, "APPROX");
-      log(reason ? `⚠️ ${reason}，已使用前端近似结果` : "Label 计算成功（前端快速，近似结果）");
-    };
-
-    if (state.labelComputeMode === "frontend_fast") {
-      computeLocal();
-      return;
-    }
-
-    try {
-      const maskBlob = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
-      const startedAt = performance.now();
-      const { label } = await getApi().computeLabel(syncScene(), maskBlob, occThreshold, functionValue);
-      state.label = label;
-      refreshLabelUi();
-      updateRequestSummary(endpoint, performance.now() - startedAt, "HTTP 200");
-      log("Label 计算成功");
-    } catch (err) {
-      const elapsed = performance.now() - startedAt;
-      computeLocal("后端精确计算失败");
-      if (isTimeoutOrAbortError(err)) {
-        updateRequestSummary(endpoint, elapsed, "TIMEOUT/ABORT");
-        log("❌ 计算 Label 超时或请求被取消，请延长超时或降低分辨率/复杂度后重试");
-      } else if (err instanceof ApiError && err.code === "MASK_DECODE_ERROR") {
-        updateRequestSummary(endpoint, elapsed, `HTTP ${err.status} / ${err.code}`);
-        log("❌ 计算 Label 失败：请检查 mask 尺寸是否与 scene.meta.resolution 完全一致");
-      } else if (err instanceof ApiError) {
-        updateRequestSummary(endpoint, elapsed, `HTTP ${err.status} / ${err.code}`);
-        log(`❌ 计算 Label 失败：${err.code} - ${err.message}`);
-      } else {
-        updateRequestSummary(endpoint, elapsed, "UNKNOWN_ERROR");
-        logError(err, "计算 Label 失败");
-      }
-      console.error(err);
-    }
+    await computeLabelAndRefresh("手动触发", "manual");
   });
 
   byId<HTMLButtonElement>("btn-shuffle").addEventListener("click", async () => {
@@ -746,6 +815,7 @@ export async function bootstrapApp(): Promise<void> {
     syncScene();
     render();
     log("已先执行本地 shuffle 并刷新画布");
+    scheduleAutoCompute("Shuffle 完成（前端）");
 
     if (!shuffleUseBackendEl.checked) {
       log("当前为本地 shuffle 模式，已跳过后端请求");
@@ -770,6 +840,7 @@ export async function bootstrapApp(): Promise<void> {
         syncScene();
         render();
         log("后端 Shuffle 已返回 scene_shuffled，已覆盖前端结果");
+        scheduleAutoCompute("Shuffle 完成（后端）");
       } else {
         log("后端未返回 scene_shuffled，已使用前端结果");
       }
