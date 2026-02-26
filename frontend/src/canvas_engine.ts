@@ -156,9 +156,9 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyW = Math.min(w, h);
-  const bodyLeft = -bodyW / 2;
-  const bodyRight = bodyW / 2 - 2;
+  const bodyW = Math.max(24, Math.min(w, h) * 0.86);
+  const bodyLeft = left + Math.max(6, w * 0.08);
+  const bodyRight = Math.min(right - 8, bodyLeft + bodyW);
   const radius = (bottom - top) / 2;
   const centerY = 0;
 
@@ -195,8 +195,8 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const bottom = h / 2;
   const bubbleR = 5.5;
   const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
-  const bodyW = Math.min(w, h);
-  const inJoinX = -bodyW / 2 + 8;
+  const bodyW = Math.max(24, Math.min(w, h) * 0.86);
+  const inJoinX = left + Math.max(6, w * 0.08);
 
   // leads
   ctx.beginPath();
@@ -211,15 +211,17 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   // ANSI-like OR body
   ctx.beginPath();
   ctx.moveTo(inJoinX, top);
-  ctx.quadraticCurveTo(-bodyW * 0.08, 0, inJoinX, bottom);
-  ctx.quadraticCurveTo(bodyW * 0.34, bottom, outX, 0);
-  ctx.quadraticCurveTo(bodyW * 0.34, top, inJoinX, top);
+  const bulgeX = inJoinX + bodyW * 0.58;
+  const backX = inJoinX + bodyW * 0.28;
+  ctx.quadraticCurveTo(backX, 0, inJoinX, bottom);
+  ctx.quadraticCurveTo(bulgeX, bottom, outX, 0);
+  ctx.quadraticCurveTo(bulgeX, top, inJoinX, top);
   ctx.stroke();
 
   if (opts.xor) {
     ctx.beginPath();
-    ctx.moveTo(inJoinX - 8, top);
-    ctx.quadraticCurveTo(-bodyW * 0.16, 0, inJoinX - 8, bottom);
+    ctx.moveTo(inJoinX - 7, top);
+    ctx.quadraticCurveTo(backX - 7, 0, inJoinX - 7, bottom);
     ctx.stroke();
   }
 
@@ -1057,16 +1059,19 @@ export class CanvasEngine {
       const custom = this.customSymbols.get(String(n.type));
       const hasCustom = Boolean(custom?.img?.complete);
       if (this.nodeRenderMode === "symbol") {
+        const symbolSpan = Math.min(bw, bh);
+        const sw = symbolSpan;
+        const sh = symbolSpan;
         if (hasCustom && custom) {
           const iw = custom.img.naturalWidth || bw;
           const ih = custom.img.naturalHeight || bh;
-          const fit = Math.min(bw / iw, bh / ih);
+          const fit = Math.min(sw / iw, sh / ih);
           const dw = iw * fit;
           const dh = ih * fit;
           ctx.drawImage(custom.img, -dw / 2, -dh / 2, dw, dh);
           rendered = true;
         } else {
-          rendered = drawComponentSymbol(ctx, n.type, bw, bh);
+          rendered = drawComponentSymbol(ctx, n.type, sw, sh);
         }
       }
       if (!hasCustom && (!rendered || this.nodeRenderMode === "box")) {
