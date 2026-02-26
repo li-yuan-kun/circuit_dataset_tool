@@ -32,6 +32,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -219,6 +221,82 @@ def _scene_resolution(scene: Dict[str, Any], settings) -> Tuple[int, int]:
         return 1024, 1024
 
 
+def _now_compact() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _build_manifest_record(*, sample_id: str, saved_paths: Dict[str, Any], scene_obj: Dict[str, Any], label_obj: Dict[str, Any], settings) -> Dict[str, Any]:
+    meta = (scene_obj or {}).get("meta", {}) if isinstance(scene_obj, dict) else {}
+    return {
+        "sample_id": sample_id,
+        "paths": saved_paths,
+        "function": (label_obj or {}).get("function"),
+        "counts_visible": (label_obj or {}).get("counts_visible"),
+        "seed": meta.get("seed"),
+        "tool_version": getattr(settings, "TOOL_VERSION", "0.3") if settings is not None else "0.3",
+        "vocab_version": meta.get("vocab_version"),
+        "timestamp": _now_iso(),
+    }
+
+
+def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> bytes:
+    from PIL import Image  # type: ignore
+
+    from ..core_logic.mask_gen import encode_png  # type: ignore
+    from ..core_logic.rasterize import render_footprint_on_canvas  # type: ignore
+
+    w, h = _scene_resolution(scene, settings)
+    canvas = np.full((h, w), 255, dtype=np.uint8)
+    for node in (scene.get("nodes") or []):
+        if not isinstance(node, dict):
+            continue
+        comp_type = str(node.get("type") or "")
+        if not comp_type:
+            continue
+        try:
+            fp = render_footprint_on_canvas(node=node, footprint_db=footprint_db, resolution=(w, h))
+        except Exception:
+            continue
+        canvas[np.asarray(fp, dtype=np.uint8) > 0] = 0
+
+    import io
+
+    gray_png = encode_png(canvas)
+    img = Image.open(io.BytesIO(gray_png)).convert("RGB")
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
+
+
+def _decode_mask_png(mask_png: bytes) -> np.ndarray:
+    import io
+
+    from PIL import Image  # type: ignore
+
+    img = Image.open(io.BytesIO(mask_png)).convert("L")
+    return np.asarray(img, dtype=np.uint8)
+
+
+def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
+    import io
+
+    from PIL import Image  # type: ignore
+
+    image = Image.open(io.BytesIO(image_png)).convert("RGB")
+    mask = Image.open(io.BytesIO(mask_png)).convert("L")
+    if image.size != mask.size:
+        mask = mask.resize(image.size)
+
+    arr = np.asarray(image, dtype=np.uint8).copy()
+    mask_arr = np.asarray(mask, dtype=np.uint8) > 0
+    arr[mask_arr, 0] = 255
+    arr[mask_arr, 1] = (arr[mask_arr, 1] * 0.35).astype(np.uint8)
+    arr[mask_arr, 2] = (arr[mask_arr, 2] * 0.35).astype(np.uint8)
+    out = io.BytesIO()
+    Image.fromarray(arr, mode="RGB").save(out, format="PNG")
+    return out.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Public API expected by router
 # ---------------------------------------------------------------------------
@@ -384,6 +462,164 @@ def run_batch_mask(payload: dict, *, job_id: str | None = None) -> dict:
     return result
 
 
+def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
+    """Unified batch dataset generation: shuffle -> image -> mask -> label -> save."""
+    settings = _get_settings()
+    if settings is None:
+        raise RuntimeError("Settings not available")
+
+    from ..core_logic.mask_gen import encode_png, generate_mask  # type: ignore
+    from ..core_logic.occlusion import compute_label  # type: ignore
+    from ..core_logic.topology import shuffle_scene  # type: ignore
+    from ..services.exporter import save_sample  # type: ignore
+    from ..services.manifest import append_record  # type: ignore
+
+    storage = _get_storage(settings)
+    footprint_db = _get_vocab(settings)
+
+    base_scene = (payload or {}).get("scene")
+    scenes = _extract_scenes(dict(payload or {}))
+    if isinstance(base_scene, dict) and not scenes:
+        scenes = [base_scene]
+    if not scenes:
+        raise ValueError("batch_dataset requires payload.scene or payload.scenes")
+
+    n = max(1, int((payload or {}).get("n") or len(scenes) or 1))
+    seed_start = int((payload or {}).get("seed_start") or (payload or {}).get("seed") or 0)
+    use_shuffle = bool((payload or {}).get("use_backend_shuffle", True))
+    shuffle_params = dict((payload or {}).get("shuffle_params") or {})
+    mask_strategy = str((payload or {}).get("mask_strategy") or "perlin")
+    mask_params = dict((payload or {}).get("mask_params") or {})
+    occ_threshold = float((payload or {}).get("occ_threshold") or 0.9)
+    function_name = str((payload or {}).get("function") or "UNKNOWN")
+    save_prefix = str((payload or {}).get("sample_prefix") or f"batch_{_now_compact()}_")
+    make_zip = bool((payload or {}).get("zip", False))
+
+    rel_dir = _job_rel_dir(job_id or _new_job_id())
+    storage.ensure_dir(rel_dir)
+    out_items: List[Dict[str, Any]] = []
+    succeeded = 0
+    failed = 0
+
+    for i in range(n):
+        seed = seed_start + i
+        source_scene = copy.deepcopy(scenes[i % len(scenes)])
+        try:
+            scene_item = source_scene
+            if use_shuffle:
+                scene_item, _ = shuffle_scene(
+                    scene=source_scene,
+                    vocab=footprint_db,
+                    params=shuffle_params,
+                    seed=seed,
+                    return_paths=True,
+                )
+
+            image_png = _rasterize_scene_png(scene_item, footprint_db, settings)
+            w, h = _scene_resolution(scene_item, settings)
+            mask_np, mask_meta = generate_mask(
+                strategy=mask_strategy,
+                resolution=(w, h),
+                scene=scene_item,
+                params=mask_params,
+                seed=seed,
+            )
+            mask_png = encode_png(mask_np)
+            mask_np_decoded = _decode_mask_png(mask_png)
+            label = compute_label(
+                scene=scene_item,
+                mask=mask_np_decoded,
+                footprint_db=footprint_db,
+                function=function_name,
+                occ_threshold=occ_threshold,
+            )
+            image_with_mask = _compose_image_with_mask(image_png, mask_png)
+
+            sample_id = f"{save_prefix}{i:06d}"
+            saved = save_sample(
+                storage,
+                image_bytes=image_png,
+                mask_bytes=mask_png,
+                scene_obj=scene_item,
+                label_obj=label,
+                sample_id=sample_id,
+            )
+            saved_paths = dict(saved.get("paths") or {})
+            rel_overlay = f"{sample_id}/image_with_mask.png"
+            saved_paths["image_with_mask"] = storage.put_bytes(rel_overlay, image_with_mask)
+
+            append_record(
+                settings.MANIFEST_PATH,
+                _build_manifest_record(
+                    sample_id=sample_id,
+                    saved_paths=saved_paths,
+                    scene_obj=scene_item,
+                    label_obj=label,
+                    settings=settings,
+                ),
+            )
+
+            out_items.append(
+                {
+                    "index": i,
+                    "seed": seed,
+                    "sample_id": sample_id,
+                    "paths": {
+                        "image": saved_paths.get("image"),
+                        "mask": saved_paths.get("mask"),
+                        "image_with_mask": saved_paths.get("image_with_mask"),
+                        "label": saved_paths.get("label"),
+                        "scene": saved_paths.get("scene"),
+                    },
+                    "mask_meta": mask_meta,
+                }
+            )
+            succeeded += 1
+        except Exception as e:
+            out_items.append({"index": i, "seed": seed, "ok": False, "error": str(e)})
+            failed += 1
+
+        if job_id is not None:
+            _job_set(job_id, progress=float(i + 1) / float(max(n, 1)))
+
+    result: Dict[str, Any] = {
+        "ok": failed == 0,
+        "job_type": "batch_dataset",
+        "num_items": len(out_items),
+        "succeeded": succeeded,
+        "failed": failed,
+        "items": out_items,
+    }
+
+    abs_dir = storage.get_abs_path(rel_dir)
+    paths: Dict[str, Any] = {"dir": rel_dir, "abs_dir": abs_dir}
+    if make_zip:
+        abs_zip = storage.get_abs_path(f"{rel_dir}.zip")
+        zip_path = Path(abs_zip)
+        zip_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for item in out_items:
+                sample_id = item.get("sample_id")
+                pths = item.get("paths") or {}
+                if not sample_id or not isinstance(pths, dict):
+                    continue
+                for key in ("image", "mask", "image_with_mask", "label", "scene"):
+                    rel_file = pths.get(key)
+                    if not isinstance(rel_file, str):
+                        continue
+                    try:
+                        abs_file = Path(storage.get_abs_path(rel_file))
+                    except Exception:
+                        continue
+                    if not abs_file.exists() or not abs_file.is_file():
+                        continue
+                    zf.write(abs_file, arcname=f"{sample_id}/{key}{abs_file.suffix}")
+        paths["zip"] = f"{rel_dir}.zip"
+        paths["abs_zip"] = abs_zip
+    result["paths"] = paths
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Worker dispatch entry
 # ---------------------------------------------------------------------------
@@ -403,6 +639,8 @@ def execute_job(job_id: str, job_type: str, payload: Dict[str, Any]) -> Dict[str
             result = run_batch_shuffle(payload, job_id=job_id)
         elif jt in ("batch_mask", "mask", "generate_mask", "mask_generate"):
             result = run_batch_mask(payload, job_id=job_id)
+        elif jt in ("batch_dataset", "dataset_batch", "batch_generate_dataset"):
+            result = run_batch_dataset(payload, job_id=job_id)
         else:
             # Generic no-op job for early integration testing.
             result = {"ok": True, "job_type": jt, "echo": payload}

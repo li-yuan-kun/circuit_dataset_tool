@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from .storage import Storage
 
 
@@ -42,6 +44,32 @@ def _stable_json_bytes(obj: Any) -> bytes:
 
 def _sha256_json(obj: Any) -> str:
     return _sha256_bytes(_stable_json_bytes(obj))
+
+
+
+
+def _compose_image_with_mask(image_bytes: bytes, mask_bytes: bytes) -> Optional[bytes]:
+    try:
+        import io
+
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        mask = Image.open(io.BytesIO(mask_bytes)).convert("L")
+        if image.size != mask.size:
+            mask = mask.resize(image.size)
+
+        arr = np.asarray(image, dtype=np.uint8).copy()
+        mask_arr = np.asarray(mask, dtype=np.uint8) > 0
+        arr[mask_arr, 0] = 255
+        arr[mask_arr, 1] = (arr[mask_arr, 1] * 0.35).astype(np.uint8)
+        arr[mask_arr, 2] = (arr[mask_arr, 2] * 0.35).astype(np.uint8)
+
+        out = io.BytesIO()
+        Image.fromarray(arr, mode="RGB").save(out, format="PNG")
+        return out.getvalue()
+    except Exception:
+        return None
 
 
 def allocate_sample_id(storage: Storage, *, prefix: str = "sample_", width: int = 6) -> str:
@@ -133,11 +161,17 @@ def save_sample(
     rel_mask = f"{sample_dir}/mask.png"
     rel_scene = f"{sample_dir}/scene.json"
     rel_label = f"{sample_dir}/label.json"
+    rel_image_with_mask = f"{sample_dir}/image_with_mask.png"
 
     p_image = storage.put_bytes(rel_image, image_bytes)
     p_mask = storage.put_bytes(rel_mask, mask_bytes)
     p_scene = storage.put_json(rel_scene, scene_obj)
     p_label = storage.put_json(rel_label, label_obj)
+
+    overlay_bytes = _compose_image_with_mask(image_bytes, mask_bytes)
+    p_image_with_mask: Optional[str] = None
+    if overlay_bytes:
+        p_image_with_mask = storage.put_bytes(rel_image_with_mask, overlay_bytes)
 
     hashes = {
         "image": _sha256_bytes(image_bytes),
@@ -145,11 +179,17 @@ def save_sample(
         "scene": _sha256_json(scene_obj),
         "label": _sha256_json(label_obj),
     }
+    if overlay_bytes:
+        hashes["image_with_mask"] = _sha256_bytes(overlay_bytes)
+
+    paths = {"image": p_image, "mask": p_mask, "scene": p_scene, "label": p_label}
+    if p_image_with_mask:
+        paths["image_with_mask"] = p_image_with_mask
 
     return {
         "ok": True,
         "sample_id": sid,
-        "paths": {"image": p_image, "mask": p_mask, "scene": p_scene, "label": p_label},
+        "paths": paths,
         "hashes": hashes,
         "timestamp": _now_iso(),
     }
