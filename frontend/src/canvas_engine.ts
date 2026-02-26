@@ -156,22 +156,18 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
-  const bodyLeft = left + 10;
-  const bodyRight = Math.min(right - 10, bodyLeft + bodyW);
-  const radius = h * 0.4;
+  const bubbleR = 5.5;
+  const radius = h * 0.5;
+  const arcRight = bubble ? right - bubbleR * 2 : right;
+  const bodyRight = arcRight - radius;
+  const bodyLeft = left + Math.max(14, w * 0.2);
   const centerY = 0;
 
-  const bubbleR = 5.5;
-  const outStart = bubble ? right - (bubbleR * 2 + 2) : right - 2;
-  const gateOutX = Math.min(outStart, bodyRight + radius);
   ctx.beginPath();
   ctx.moveTo(left, -h * 0.22);
   ctx.lineTo(bodyLeft, -h * 0.22);
   ctx.moveTo(left, h * 0.22);
   ctx.lineTo(bodyLeft, h * 0.22);
-  ctx.moveTo(gateOutX, 0);
-  ctx.lineTo(right, 0);
   ctx.stroke();
 
   ctx.beginPath();
@@ -184,7 +180,7 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
 
   if (bubble) {
     ctx.beginPath();
-    ctx.arc(gateOutX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.arc(right - bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -195,10 +191,9 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const top = -h / 2;
   const bottom = h / 2;
   const bubbleR = 5.5;
-  const maxOutX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
+  const gateOutX = opts.bubble ? right - bubbleR * 2 : right;
   const bodyW = Math.max(22, Math.min(w, h) * 0.7);
-  const inJoinX = left + 10;
-  const gateOutX = Math.min(maxOutX, inJoinX + bodyW);
+  const inJoinX = left + Math.max(14, w * 0.2);
 
   // leads
   ctx.beginPath();
@@ -206,8 +201,6 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.lineTo(inJoinX, -h * 0.22);
   ctx.moveTo(left, h * 0.22);
   ctx.lineTo(inJoinX, h * 0.22);
-  ctx.moveTo(gateOutX, 0);
-  ctx.lineTo(right, 0);
   ctx.stroke();
 
   // ANSI-like OR body
