@@ -867,7 +867,7 @@ export async function bootstrapApp(): Promise<void> {
 
   byId<HTMLButtonElement>("btn-save-backend").addEventListener("click", async () => {
     try {
-      const imagePng = await exportCanvasPNG(circuitCanvas);
+      const imagePng = await renderSceneToImagePng(sceneItem);
       const maskPng = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
       const sceneJson = makeSceneJson(syncScene());
       const label = state.label ?? {
@@ -922,6 +922,18 @@ export async function bootstrapApp(): Promise<void> {
       zip: byId<HTMLInputElement>("batch-zip").checked,
     };
 
+    const renderSceneToImagePng = async (scene: Scene): Promise<Blob> => {
+      const canvas = document.createElement("canvas");
+      canvas.width = resolution.w;
+      canvas.height = resolution.h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("无法创建批处理离屏画布");
+      const tempEngine = new CanvasEngine({ resolution, vocab });
+      tempEngine.loadScene(scene);
+      tempEngine.draw(ctx);
+      return await exportCanvasPNG(canvas);
+    };
+
     const requestWithRetry = async <T>(fn: () => Promise<T>, retries = 2, delayMs = 600): Promise<T> => {
       let lastError: unknown;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -964,7 +976,7 @@ export async function bootstrapApp(): Promise<void> {
 
             const sceneJson = makeSceneJson(sceneItem);
             const labelJson = makeLabelJson(labelRes.label);
-            const imagePng = await exportCanvasPNG(circuitCanvas);
+            const imagePng = await renderSceneToImagePng(sceneItem);
 
             const saveRes = await getApi().saveSampleMultipart({
               imagePng,
