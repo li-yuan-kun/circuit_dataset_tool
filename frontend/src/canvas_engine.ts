@@ -746,17 +746,31 @@ export class CanvasEngine {
     return false;
   }
 
-  private netObstacles(net: Net): BBox[] {
+  private netObstacles(_net: Net): BBox[] {
+    const margin = 2;
     return this.scene.nodes
-      .filter((n) => n.id !== net.from.node && n.id !== net.to.node)
       .map((n) => this.nodeBBox(n.id))
+      .map((bb) => (bb ? { x0: bb.x0 - margin, y0: bb.y0 - margin, x1: bb.x1 + margin, y1: bb.y1 + margin } : null))
       .filter((bb): bb is BBox => !!bb);
+  }
+
+  private pathForObstacleCheck(path: Point[], net: Net): Point[] {
+    if (!Array.isArray(path) || path.length < 2) return path;
+    const leadLen = 12;
+    const p0 = this.endpointXY(net.from);
+    const p1 = this.endpointXY(net.to);
+    const p0Out = this.endpointOutPoint(net.from, p0, leadLen);
+    const p1Out = this.endpointOutPoint(net.to, p1, leadLen);
+    const adjusted = path.map((p) => ({ ...p }));
+    adjusted[0] = p0Out;
+    adjusted[adjusted.length - 1] = p1Out;
+    return adjusted;
   }
 
   private validateBackendPath(net: Net, path: Point[]): { ok: boolean; hitObstacle: boolean } {
     if (!Array.isArray(path) || path.length < 2) return { ok: false, hitObstacle: false };
     const obstacles = this.netObstacles(net);
-    const hitObstacle = this.pathIntersectsBBoxes(path, obstacles);
+    const hitObstacle = this.pathIntersectsBBoxes(this.pathForObstacleCheck(path, net), obstacles);
     return { ok: !hitObstacle, hitObstacle };
   }
 
@@ -792,7 +806,7 @@ export class CanvasEngine {
     }
 
     for (const candidate of tryPaths) {
-      if (!this.pathIntersectsBBoxes(candidate, obstacles)) {
+      if (!this.pathIntersectsBBoxes(this.pathForObstacleCheck(candidate, net), obstacles)) {
         (net as any).route_status = "ok";
         (net as any).route_message = undefined;
         return candidate;
@@ -821,12 +835,10 @@ export class CanvasEngine {
     const hv = [{ ...p0 }, { ...p0Out }, { x: p1Out.x, y: p0Out.y }, { ...p1Out }, { ...p1 }];
     const vh = [{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1Out.y }, { ...p1Out }, { ...p1 }];
 
-    const fromBox = this.nodeBBox(net.from.node);
-    const toBox = this.nodeBBox(net.to.node);
-    const endpointBoxes = [fromBox, toBox].filter((bb): bb is BBox => !!bb);
+    const obstacles = this.netObstacles(net);
 
-    const hvPenalty = this.pathIntersectsBBoxes(hv.slice(1, hv.length - 1), endpointBoxes) ? 1 : 0;
-    const vhPenalty = this.pathIntersectsBBoxes(vh.slice(1, vh.length - 1), endpointBoxes) ? 1 : 0;
+    const hvPenalty = this.pathIntersectsBBoxes(this.pathForObstacleCheck(hv, net), obstacles) ? 1 : 0;
+    const vhPenalty = this.pathIntersectsBBoxes(this.pathForObstacleCheck(vh, net), obstacles) ? 1 : 0;
     const base = hvPenalty <= vhPenalty ? hv : vh;
     const routed = this.reroutePolylineAvoidObstacles(base, net);
     const failed = String((net as any).route_status ?? "") === "failed";
@@ -948,7 +960,7 @@ export class CanvasEngine {
 
     const merged = this.simplifyOrthogonalPath([p0, p0Out, ...mids, p1Out, p1]);
     const obstacles = this.netObstacles(net);
-    if (this.pathIntersectsBBoxes(merged, obstacles)) return null;
+    if (this.pathIntersectsBBoxes(this.pathForObstacleCheck(merged, net), obstacles)) return null;
     return merged;
   }
 
