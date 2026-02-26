@@ -276,13 +276,15 @@ export async function bootstrapApp(): Promise<void> {
   const applyNodeRenderSettings = (): void => {
     const mode = byId<HTMLSelectElement>("node-render-mode").value as NodeRenderMode;
     const strokeScale = toNum(byId<HTMLInputElement>("node-stroke-scale").value, 1);
+    const netStrokeScale = toNum(byId<HTMLInputElement>("net-stroke-scale").value, 1);
     const showLabel = byId<HTMLInputElement>("node-show-type").checked;
-    engine.setNodeRenderOptions({ mode, strokeScale, showTypeLabelOnSymbol: showLabel });
+    engine.setNodeRenderOptions({ mode, strokeScale, netStrokeScale, showTypeLabelOnSymbol: showLabel });
 
     try {
       localStorage.setItem("cdt.nodeRenderMode", mode);
       localStorage.setItem("cdt.nodeStrokeScale", String(strokeScale));
       localStorage.setItem("cdt.nodeShowType", String(showLabel));
+      localStorage.setItem("cdt.netStrokeScale", String(netStrokeScale));
     } catch {
       // ignore
     }
@@ -293,6 +295,8 @@ export async function bootstrapApp(): Promise<void> {
     const strokeEl = byId<HTMLInputElement>("node-stroke-scale");
     const strokeText = byId<HTMLSpanElement>("node-stroke-scale-text");
     const showTypeEl = byId<HTMLInputElement>("node-show-type");
+    const netStrokeEl = byId<HTMLInputElement>("net-stroke-scale");
+    const netStrokeText = byId<HTMLSpanElement>("net-stroke-scale-text");
 
     try {
       const mode = localStorage.getItem("cdt.nodeRenderMode");
@@ -301,11 +305,14 @@ export async function bootstrapApp(): Promise<void> {
       if (Number.isFinite(stroke)) strokeEl.value = String(Math.max(0.5, Math.min(3, stroke)));
       const showType = localStorage.getItem("cdt.nodeShowType");
       if (showType === "true" || showType === "false") showTypeEl.checked = showType === "true";
+      const netStroke = Number(localStorage.getItem("cdt.netStrokeScale"));
+      if (Number.isFinite(netStroke)) netStrokeEl.value = String(Math.max(0.5, Math.min(4, netStroke)));
     } catch {
       // ignore
     }
 
     strokeText.textContent = Number(strokeEl.value).toFixed(1);
+    netStrokeText.textContent = Number(netStrokeEl.value).toFixed(1);
     applyNodeRenderSettings();
     modeEl.addEventListener("change", () => {
       applyNodeRenderSettings();
@@ -318,6 +325,11 @@ export async function bootstrapApp(): Promise<void> {
       render();
     });
     showTypeEl.addEventListener("change", () => {
+      applyNodeRenderSettings();
+      render();
+    });
+    netStrokeEl.addEventListener("input", () => {
+      netStrokeText.textContent = Number(netStrokeEl.value).toFixed(1);
       applyNodeRenderSettings();
       render();
     });
@@ -984,13 +996,15 @@ export async function bootstrapApp(): Promise<void> {
       let nextIndex = 0;
       let succeeded = 0;
       let failed = 0;
+      const maxAttempts = Math.max(n, n * 20);
       const savedItems: Array<{ sampleId: string; savedPaths: Record<string, any> }> = [];
 
       const worker = async (): Promise<void> => {
         while (true) {
+          if (succeeded >= n) return;
           const index = nextIndex;
           nextIndex += 1;
-          if (index >= n) return;
+          if (index >= maxAttempts) return;
 
           const seed = seedStart + index;
           const sampleId = `batch_mvp_${seed}_${index}`;
@@ -1025,14 +1039,19 @@ export async function bootstrapApp(): Promise<void> {
             failed += 1;
             log(`⚠️ MVP 批处理样本失败(index=${index}, seed=${seed})：${userFacingError(error, "处理失败")}`);
           }
-          const progress = Math.round(((succeeded + failed) / Math.max(n, 1)) * 100);
-          setStatus(`MVP串行批处理中 | 进度=${progress}% | 成功=${succeeded} | 失败=${failed}`);
+          const progress = Math.round((succeeded / Math.max(n, 1)) * 100);
+          setStatus(`MVP串行批处理中 | 进度=${progress}% | 成功=${succeeded}/${n} | 尝试失败=${failed}`);
         }
       };
 
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      setStatus(`MVP批处理完成 | 成功=${succeeded} | 失败=${failed}`);
-      log(`MVP 批处理完成：成功=${succeeded}，失败=${failed}`);
+      if (succeeded < n) {
+        setStatus(`MVP批处理结束 | 仅成功=${succeeded}/${n} | 尝试失败=${failed}`);
+        log(`⚠️ MVP 批处理达到最大尝试次数，成功=${succeeded}/${n}，失败=${failed}`);
+      } else {
+        setStatus(`MVP批处理完成 | 成功=${succeeded}/${n} | 尝试失败=${failed}`);
+        log(`MVP 批处理完成：成功=${succeeded}/${n}，失败=${failed}`);
+      }
       if (savedItems.length > 0) {
         const first = savedItems[0];
         log(`MVP 保存位置示例：sample_id=${first.sampleId}，image=${first.savedPaths?.image ?? "(未知)"}`);
