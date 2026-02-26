@@ -156,10 +156,10 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
-  const bodyLeft = left + Math.max(6, w * 0.08);
-  const bodyRight = Math.min(right - 8, bodyLeft + bodyW);
-  const radius = (bottom - top) / 2;
+  const bodyW = Math.max(20, Math.min(w, h) * 0.5);
+  const bodyLeft = left + 10;
+  const bodyRight = Math.min(right - 10, bodyLeft + bodyW);
+  const radius = h * 0.4;
   const centerY = 0;
 
   const bubbleR = 5.5;
@@ -194,9 +194,10 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const top = -h / 2;
   const bottom = h / 2;
   const bubbleR = 5.5;
-  const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
-  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
-  const inJoinX = left + Math.max(6, w * 0.08);
+  const maxOutX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
+  const bodyW = Math.max(20, Math.min(w, h) * 0.5);
+  const inJoinX = left + 10;
+  const gateOutX = Math.min(maxOutX, inJoinX + bodyW);
 
   // leads
   ctx.beginPath();
@@ -204,17 +205,17 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.lineTo(inJoinX, -h * 0.22);
   ctx.moveTo(left, h * 0.22);
   ctx.lineTo(inJoinX, h * 0.22);
-  ctx.moveTo(outX, 0);
+  ctx.moveTo(gateOutX, 0);
   ctx.lineTo(right, 0);
   ctx.stroke();
 
   // ANSI-like OR body
   ctx.beginPath();
   ctx.moveTo(inJoinX, top);
-  const bulgeX = inJoinX + bodyW * 0.58;
-  const backX = inJoinX + bodyW * 0.28;
+  const bulgeX = inJoinX + bodyW * 0.7;
+  const backX = inJoinX + bodyW * 0.32;
   ctx.quadraticCurveTo(backX, 0, inJoinX, bottom);
-  ctx.quadraticCurveTo(bulgeX, bottom, outX, 0);
+  ctx.quadraticCurveTo(bulgeX, bottom, gateOutX, 0);
   ctx.quadraticCurveTo(bulgeX, top, inJoinX, top);
   ctx.stroke();
 
@@ -227,7 +228,7 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
 
   if (opts.bubble) {
     ctx.beginPath();
-    ctx.arc(outX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.arc(gateOutX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
