@@ -156,18 +156,21 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bubbleR = 5.5;
-  const radius = h * 0.5;
-  const arcRight = bubble ? right - bubbleR * 2 : right;
-  const bodyRight = arcRight - radius;
-  const bodyLeft = left + Math.max(14, w * 0.2);
+  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
+  const bodyLeft = left + Math.max(6, w * 0.08);
+  const bodyRight = Math.min(right - 8, bodyLeft + bodyW);
+  const radius = (bottom - top) / 2;
   const centerY = 0;
 
+  const bubbleR = 5.5;
+  const outStart = bubble ? right - (bubbleR * 2 + 2) : right - 2;
   ctx.beginPath();
   ctx.moveTo(left, -h * 0.22);
   ctx.lineTo(bodyLeft, -h * 0.22);
   ctx.moveTo(left, h * 0.22);
   ctx.lineTo(bodyLeft, h * 0.22);
+  ctx.moveTo(outStart, 0);
+  ctx.lineTo(right, 0);
   ctx.stroke();
 
   ctx.beginPath();
@@ -180,7 +183,7 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
 
   if (bubble) {
     ctx.beginPath();
-    ctx.arc(right - bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.arc(outStart + bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -191,9 +194,9 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const top = -h / 2;
   const bottom = h / 2;
   const bubbleR = 5.5;
-  const gateOutX = opts.bubble ? right - bubbleR * 2 : right;
-  const bodyW = Math.max(22, Math.min(w, h) * 0.7);
-  const inJoinX = left + Math.max(14, w * 0.2);
+  const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
+  const bodyW = Math.max(22, Math.min(w, h) * 0.66);
+  const inJoinX = left + Math.max(6, w * 0.08);
 
   // leads
   ctx.beginPath();
@@ -201,15 +204,17 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   ctx.lineTo(inJoinX, -h * 0.22);
   ctx.moveTo(left, h * 0.22);
   ctx.lineTo(inJoinX, h * 0.22);
+  ctx.moveTo(outX, 0);
+  ctx.lineTo(right, 0);
   ctx.stroke();
 
   // ANSI-like OR body
   ctx.beginPath();
   ctx.moveTo(inJoinX, top);
-  const bulgeX = inJoinX + bodyW * 0.7;
-  const backX = inJoinX + bodyW * 0.32;
+  const bulgeX = inJoinX + bodyW * 0.58;
+  const backX = inJoinX + bodyW * 0.28;
   ctx.quadraticCurveTo(backX, 0, inJoinX, bottom);
-  ctx.quadraticCurveTo(bulgeX, bottom, gateOutX, 0);
+  ctx.quadraticCurveTo(bulgeX, bottom, outX, 0);
   ctx.quadraticCurveTo(bulgeX, top, inJoinX, top);
   ctx.stroke();
 
@@ -222,7 +227,7 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
 
   if (opts.bubble) {
     ctx.beginPath();
-    ctx.arc(gateOutX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.arc(outX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
