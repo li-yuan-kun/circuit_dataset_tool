@@ -116,6 +116,10 @@ function isTimeoutError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function bootstrapApp(): Promise<void> {
   // 必需元素：缺失时直接抛错，避免进入半初始化状态
   const statusLog = byId<HTMLPreElement>("status-log");
@@ -885,6 +889,63 @@ export async function bootstrapApp(): Promise<void> {
       log(`样本已保存到后端，sample_id=${result.sample_id}`);
     } catch (err) {
       logError(err, "保存到后端失败，请检查后端服务状态");
+    }
+  });
+
+  byId<HTMLButtonElement>("btn-generate-batch").addEventListener("click", async () => {
+    const statusEl = byId<HTMLDivElement>("batch-job-status");
+    const setStatus = (msg: string): void => {
+      statusEl.textContent = msg;
+    };
+
+    try {
+      const payload = {
+        job_type: "batch_dataset",
+        scene: syncScene(),
+        n: Math.max(1, Math.floor(toNum(byId<HTMLInputElement>("batch-n").value, 10))),
+        seed_start: Math.floor(toNum(byId<HTMLInputElement>("batch-seed-start").value, 1)),
+        use_backend_shuffle: byId<HTMLInputElement>("batch-use-shuffle").checked,
+        mask_strategy: byId<HTMLSelectElement>("batch-mask-strategy").value,
+        mask_params: {
+          ratio: toNum(byId<HTMLInputElement>("batch-mask-ratio").value, 0.35),
+          scale: toNum(byId<HTMLInputElement>("batch-mask-scale").value, 64),
+        },
+        occ_threshold: toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9),
+        function: byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value,
+        zip: byId<HTMLInputElement>("batch-zip").checked,
+      };
+
+      const { job_id } = await getApi().submitJob(payload);
+      log(`批处理任务已提交，job_id=${job_id}`);
+      setStatus(`任务 ${job_id} 已提交，等待执行...`);
+
+      for (let i = 0; i < 600; i += 1) {
+        const st = await getApi().getJobStatus(job_id);
+        const progress = Math.round((Number(st.progress) || 0) * 100);
+        const succeeded = Number(st?.result?.succeeded ?? 0);
+        const failed = Number(st?.result?.failed ?? 0);
+        setStatus(`状态=${st.status ?? "unknown"} | 进度=${progress}% | 成功=${succeeded} | 失败=${failed}`);
+
+        if (st.status === "succeeded") {
+          const zipPath = st?.result?.paths?.zip;
+          const dirPath = st?.result?.paths?.dir;
+          log(`批处理完成：成功=${succeeded}，失败=${failed}`);
+          log(`结果目录：${dirPath ?? "(无)"}${zipPath ? `，zip=${zipPath}` : ""}`);
+          return;
+        }
+        if (st.status === "failed") {
+          const errMsg = st?.error?.message ?? "未知错误";
+          log(`❌ 批处理失败：${errMsg}`);
+          setStatus(`任务失败：${errMsg}`);
+          return;
+        }
+        await sleepMs(1000);
+      }
+      setStatus("任务轮询超时，请稍后用 job_id 手动查询。");
+      log("⚠️ 批处理轮询超时，请稍后重试查询任务状态");
+    } catch (err) {
+      logError(err, "批处理任务提交/查询失败");
+      setStatus("批处理失败，请查看日志。");
     }
   });
 

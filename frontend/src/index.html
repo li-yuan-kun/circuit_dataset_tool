@@ -392,6 +392,48 @@
           </div>
 
           <details class="details">
+            <summary>批量数据集任务（Jobs）</summary>
+            <div class="grid2">
+              <label class="field">
+                <span class="field__label">样本数 n</span>
+                <input id="batch-n" class="input" type="number" min="1" max="5000" step="1" value="10" />
+              </label>
+              <label class="field">
+                <span class="field__label">seed 起点</span>
+                <input id="batch-seed-start" class="input" type="number" step="1" value="1" />
+              </label>
+              <label class="field">
+                <span class="field__label">后端 Shuffle</span>
+                <input id="batch-use-shuffle" type="checkbox" checked />
+              </label>
+              <label class="field">
+                <span class="field__label">Mask 策略</span>
+                <select id="batch-mask-strategy" class="select">
+                  <option value="perlin">perlin</option>
+                  <option value="blobs">blobs</option>
+                  <option value="strokes">strokes</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field__label">Mask ratio</span>
+                <input id="batch-mask-ratio" class="input" type="number" min="0" max="1" step="0.01" value="0.35" />
+              </label>
+              <label class="field">
+                <span class="field__label">Mask scale</span>
+                <input id="batch-mask-scale" class="input" type="number" min="1" max="256" step="1" value="64" />
+              </label>
+              <label class="field">
+                <span class="field__label">导出 zip</span>
+                <input id="batch-zip" type="checkbox" checked />
+              </label>
+            </div>
+            <div class="row">
+              <button id="btn-generate-batch" type="button" class="btn btn--primary btn--block">提交批处理任务</button>
+            </div>
+            <div id="batch-job-status" class="muted small">尚未启动批处理任务。</div>
+          </details>
+
+          <details class="details">
             <summary>Shuffle 参数</summary>
             <div class="grid2">
               <label class="field">
