@@ -3,7 +3,14 @@ import { CanvasEngine, type NodeRenderMode } from "./canvas_engine";
 import { MaskLayer } from "./make_layer";
 import { computeLabelLocalApprox } from "./modules/label_local";
 import type { Label, Scene } from "./modules/types";
-import { exportCanvasPNG, makeLabelJson, makeSceneJson, suggestSampleId } from "./utils/export";
+import {
+  exportCanvasPNG,
+  exportCompositePNG,
+  makeLabelJson,
+  makeSceneJson,
+  packZip,
+  suggestSampleId,
+} from "./utils/export";
 
 type EditorMode = "circuit" | "mask";
 type LabelComputeMode = "frontend_fast" | "backend_precise";
@@ -496,8 +503,35 @@ export async function bootstrapApp(): Promise<void> {
   }, log);
 
   // 可选功能元素：缺失不影响主流程
-  bindOptionalClick("btn-export-local", () => {
-    log("本地样本包导出功能暂未接入，已跳过");
+  bindOptionalClick("btn-export-local", async () => {
+    try {
+      const scene = syncScene();
+      const imagePng = await exportCanvasPNG(circuitCanvas);
+      const maskPng = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
+      const compositePng = await exportCompositePNG(circuitCanvas, state.maskBlob ?? maskLayer.getMaskImageData(), {
+        maskColor: "#ff0000",
+        maskOpacity: 0.45,
+      });
+      const label = state.label ?? {
+        counts_all: {},
+        counts_visible: {},
+        occlusion: [],
+        occ_threshold: toNum(byId<HTMLInputElement>("occ-threshold").value, 0.9),
+        function: byId<HTMLInputElement>("function-custom").value.trim() || byId<HTMLSelectElement>("function-select").value,
+      };
+
+      const zipBlob = await packZip([
+        { name: "image.png", blob: imagePng },
+        { name: "mask.png", blob: maskPng },
+        { name: "image_with_mask.png", blob: compositePng },
+        { name: "scene.json", blob: makeSceneJson(scene) },
+        { name: "label.json", blob: makeLabelJson(label) },
+      ]);
+      downloadBlob("sample_local.zip", zipBlob);
+      log("已导出本地样本包 sample_local.zip（含 image/mask/composite/scene/label）");
+    } catch (err) {
+      logError(err, "导出本地样本包失败");
+    }
   }, log);
 
   bindOptionalClick("btn-apply-function", () => {
@@ -793,6 +827,19 @@ export async function bootstrapApp(): Promise<void> {
     const blob = await maskLayer.exportMaskBinaryPNG();
     downloadBlob("mask.png", blob);
     log("已导出 mask.png");
+  });
+
+  byId<HTMLButtonElement>("btn-export-composite").addEventListener("click", async () => {
+    try {
+      const compositePng = await exportCompositePNG(circuitCanvas, state.maskBlob ?? maskLayer.getMaskImageData(), {
+        maskColor: "#ff0000",
+        maskOpacity: 0.45,
+      });
+      downloadBlob("image_with_mask.png", compositePng);
+      log("已导出 image_with_mask.png（电路图 + 红色半透明 Mask 覆盖）");
+    } catch (err) {
+      logError(err, "导出 image_with_mask.png 失败");
+    }
   });
 
   byId<HTMLButtonElement>("mask-mode-paint").addEventListener("click", () => {
