@@ -82,17 +82,19 @@ function rotateXY(x: number, y: number, rad: number): { x: number; y: number } {
 function drawResistorSymbol(ctx: CanvasRenderingContext2D, w: number): void {
   const start = -w / 2;
   const end = w / 2;
-  const lead = Math.min(16, w * 0.18);
+  const lead = Math.min(18, w * 0.2);
   const bodyStart = start + lead;
   const bodyEnd = end - lead;
-  const step = (bodyEnd - bodyStart) / 8;
+  const zigCount = 7;
+  const step = (bodyEnd - bodyStart) / zigCount;
+  const amp = Math.max(7, Math.min(12, w * 0.08));
 
   ctx.beginPath();
   ctx.moveTo(start, 0);
   ctx.lineTo(bodyStart, 0);
-  for (let i = 0; i <= 7; i++) {
-    const x = bodyStart + step * (i + 1);
-    const y = i === 7 ? 0 : i % 2 === 0 ? -10 : 10;
+  for (let i = 1; i <= zigCount; i++) {
+    const x = bodyStart + step * i;
+    const y = i === zigCount ? 0 : i % 2 === 1 ? -amp : amp;
     ctx.lineTo(x, y);
   }
   ctx.lineTo(end, 0);
@@ -102,10 +104,10 @@ function drawResistorSymbol(ctx: CanvasRenderingContext2D, w: number): void {
 function drawCapacitorSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const start = -w / 2;
   const end = w / 2;
-  const plateGap = Math.min(20, w * 0.22);
+  const plateGap = Math.min(16, w * 0.2);
   const leftPlateX = -plateGap;
   const rightPlateX = plateGap;
-  const plateHalf = Math.max(16, h * 0.4);
+  const plateHalf = Math.max(14, h * 0.42);
 
   ctx.beginPath();
   ctx.moveTo(start, 0);
@@ -124,19 +126,20 @@ function drawNotSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): voi
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const tipX = right - 14;
-  const bubbleR = 7;
+  const tipX = right - 16;
+  const bubbleR = 5.5;
+  const bodyLeft = left + 16;
 
   ctx.beginPath();
   ctx.moveTo(left, 0);
-  ctx.lineTo(left + 20, 0);
+  ctx.lineTo(bodyLeft, 0);
   ctx.moveTo(tipX + bubbleR * 2, 0);
   ctx.lineTo(right, 0);
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.moveTo(left + 20, top);
-  ctx.lineTo(left + 20, bottom);
+  ctx.moveTo(bodyLeft, top);
+  ctx.lineTo(bodyLeft, bottom);
   ctx.lineTo(tipX, 0);
   ctx.closePath();
   ctx.stroke();
@@ -151,17 +154,18 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyLeft = left + 18;
+  const bodyLeft = left + 16;
   const bodyRight = right - 18;
   const radius = (bottom - top) / 2;
   const centerY = 0;
 
-  const outStart = bubble ? right - 15 : right - 2;
+  const bubbleR = 5.5;
+  const outStart = bubble ? right - (bubbleR * 2 + 2) : right - 2;
   ctx.beginPath();
-  ctx.moveTo(left, -h * 0.25);
-  ctx.lineTo(bodyLeft, -h * 0.25);
-  ctx.moveTo(left, h * 0.25);
-  ctx.lineTo(bodyLeft, h * 0.25);
+  ctx.moveTo(left, -h * 0.22);
+  ctx.lineTo(bodyLeft, -h * 0.22);
+  ctx.moveTo(left, h * 0.22);
+  ctx.lineTo(bodyLeft, h * 0.22);
   ctx.moveTo(outStart, 0);
   ctx.lineTo(right, 0);
   ctx.stroke();
@@ -176,7 +180,7 @@ function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number
 
   if (bubble) {
     ctx.beginPath();
-    ctx.arc(right - 9, 0, 6, 0, Math.PI * 2);
+    ctx.arc(outStart + bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -186,36 +190,38 @@ function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number,
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const outX = opts.bubble ? right - 14 : right - 2;
+  const bubbleR = 5.5;
+  const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
+  const inJoinX = left + 18;
 
   // leads
   ctx.beginPath();
-  ctx.moveTo(left, -h * 0.25);
-  ctx.quadraticCurveTo(left + 14, -h * 0.25, left + 20, -h * 0.2);
-  ctx.moveTo(left, h * 0.25);
-  ctx.quadraticCurveTo(left + 14, h * 0.25, left + 20, h * 0.2);
+  ctx.moveTo(left, -h * 0.22);
+  ctx.lineTo(inJoinX, -h * 0.22);
+  ctx.moveTo(left, h * 0.22);
+  ctx.lineTo(inJoinX, h * 0.22);
   ctx.moveTo(outX, 0);
   ctx.lineTo(right, 0);
   ctx.stroke();
 
-  // OR body
+  // ANSI-like OR body
   ctx.beginPath();
-  ctx.moveTo(left + 20, top);
-  ctx.quadraticCurveTo(left + 44, 0, left + 20, bottom);
-  ctx.quadraticCurveTo(right - 28, bottom, outX, 0);
-  ctx.quadraticCurveTo(right - 28, top, left + 20, top);
+  ctx.moveTo(inJoinX, top);
+  ctx.quadraticCurveTo(left + 46, 0, inJoinX, bottom);
+  ctx.quadraticCurveTo(right - 30, bottom, outX, 0);
+  ctx.quadraticCurveTo(right - 30, top, inJoinX, top);
   ctx.stroke();
 
   if (opts.xor) {
     ctx.beginPath();
-    ctx.moveTo(left + 12, top);
-    ctx.quadraticCurveTo(left + 36, 0, left + 12, bottom);
+    ctx.moveTo(left + 10, top);
+    ctx.quadraticCurveTo(left + 38, 0, left + 10, bottom);
     ctx.stroke();
   }
 
   if (opts.bubble) {
     ctx.beginPath();
-    ctx.arc(right - 8, 0, 6, 0, Math.PI * 2);
+    ctx.arc(outX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -225,14 +231,14 @@ function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: numbe
   const right = w / 2;
   const top = -h / 2;
   const bottom = h / 2;
-  const bodyLeft = left + 22;
-  const bodyRight = right - 16;
+  const bodyLeft = left + 18;
+  const bodyRight = right - 14;
 
   ctx.beginPath();
-  ctx.moveTo(left, -h * 0.25);
-  ctx.lineTo(bodyLeft, -h * 0.25);
-  ctx.moveTo(left, h * 0.25);
-  ctx.lineTo(bodyLeft, h * 0.25);
+  ctx.moveTo(left, -h * 0.23);
+  ctx.lineTo(bodyLeft, -h * 0.23);
+  ctx.moveTo(left, h * 0.23);
+  ctx.lineTo(bodyLeft, h * 0.23);
   ctx.moveTo(bodyRight, 0);
   ctx.lineTo(right, 0);
   ctx.stroke();
@@ -244,33 +250,34 @@ function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.closePath();
   ctx.stroke();
 
-  ctx.font = "13px sans-serif";
+  ctx.font = "12px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#111";
-  ctx.fillText("+", bodyLeft + 12, -h * 0.22);
-  ctx.fillText("−", bodyLeft + 12, h * 0.22);
+  ctx.fillText("+", bodyLeft + 12, -h * 0.2);
+  ctx.fillText("−", bodyLeft + 12, h * 0.2);
 }
 
 function drawGroundSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const left = -w / 2;
   const right = w / 2;
   const top = -h / 2;
-  const y0 = h * 0.05;
+  const y0 = h * 0.02;
+  const step = Math.max(10, h * 0.16);
   ctx.beginPath();
   ctx.moveTo(0, top);
   ctx.lineTo(0, y0);
-  ctx.moveTo(left * 0.45, y0);
-  ctx.lineTo(right * 0.45, y0);
-  ctx.moveTo(left * 0.32, y0 + 12);
-  ctx.lineTo(right * 0.32, y0 + 12);
-  ctx.moveTo(left * 0.2, y0 + 24);
-  ctx.lineTo(right * 0.2, y0 + 24);
+  ctx.moveTo(left * 0.46, y0);
+  ctx.lineTo(right * 0.46, y0);
+  ctx.moveTo(left * 0.3, y0 + step);
+  ctx.lineTo(right * 0.3, y0 + step);
+  ctx.moveTo(left * 0.16, y0 + step * 2);
+  ctx.lineTo(right * 0.16, y0 + step * 2);
   ctx.stroke();
 }
 
 function drawSourceSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const r = Math.max(12, Math.min(w, h) * 0.32);
+  const r = Math.max(12, Math.min(w, h) * 0.3);
   ctx.beginPath();
   ctx.moveTo(-w / 2, 0);
   ctx.lineTo(-r, 0);
@@ -283,10 +290,9 @@ function drawSourceSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): 
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.moveTo(0, -r * 0.55);
-  ctx.lineTo(0, r * 0.55);
-  ctx.moveTo(-r * 0.45, 0);
-  ctx.lineTo(r * 0.45, 0);
+  ctx.moveTo(-r * 0.5, 0);
+  ctx.quadraticCurveTo(-r * 0.25, -r * 0.35, 0, 0);
+  ctx.quadraticCurveTo(r * 0.25, r * 0.35, r * 0.5, 0);
   ctx.stroke();
 }
 
