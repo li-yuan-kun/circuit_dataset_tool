@@ -1142,16 +1142,25 @@ function initDrawSymbolPad(opts: {
   const statusEl = byId<HTMLDivElement>("draw-symbol-status");
   const penBtn = byId<HTMLButtonElement>("btn-draw-symbol-pen");
   const eraserBtn = byId<HTMLButtonElement>("btn-draw-symbol-eraser");
+  const lineBtn = byId<HTMLButtonElement>("btn-draw-symbol-line");
+  const curveBtn = byId<HTMLButtonElement>("btn-draw-symbol-curve");
   if (!ctx) return;
 
   let drawing = false;
-  let eraseMode = false;
+  let toolMode: "pen" | "eraser" | "line" | "curve" = "pen";
+  let lineStart: { x: number; y: number } | null = null;
+  let curveStart: { x: number; y: number } | null = null;
+  let curveControl: { x: number; y: number } | null = null;
 
   const updateToolState = () => {
-    penBtn.classList.toggle("is-active", !eraseMode);
-    eraserBtn.classList.toggle("is-active", eraseMode);
-    penBtn.setAttribute("aria-pressed", String(!eraseMode));
-    eraserBtn.setAttribute("aria-pressed", String(eraseMode));
+    penBtn.classList.toggle("is-active", toolMode === "pen");
+    eraserBtn.classList.toggle("is-active", toolMode === "eraser");
+    lineBtn.classList.toggle("is-active", toolMode === "line");
+    curveBtn.classList.toggle("is-active", toolMode === "curve");
+    penBtn.setAttribute("aria-pressed", String(toolMode === "pen"));
+    eraserBtn.setAttribute("aria-pressed", String(toolMode === "eraser"));
+    lineBtn.setAttribute("aria-pressed", String(toolMode === "line"));
+    curveBtn.setAttribute("aria-pressed", String(toolMode === "curve"));
   };
 
   const point = (ev: MouseEvent) => {
@@ -1174,7 +1183,7 @@ function initDrawSymbolPad(opts: {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.lineWidth = Math.max(1, Number(widthEl.value) || 4);
-    ctx.globalCompositeOperation = eraseMode ? "destination-out" : "source-over";
+    ctx.globalCompositeOperation = toolMode === "eraser" ? "destination-out" : "source-over";
     ctx.strokeStyle = "#111827";
   };
 
@@ -1183,20 +1192,57 @@ function initDrawSymbolPad(opts: {
   updateToolState();
 
   canvas.addEventListener("mousedown", (ev) => {
-    drawing = true;
     const p = point(ev);
+    if (toolMode === "line") {
+      lineStart = p;
+      statusEl.textContent = "直线模式：拖拽并松开绘制一条直线。";
+      return;
+    }
+    if (toolMode === "curve") {
+      if (!curveStart) {
+        curveStart = p;
+        curveControl = null;
+        statusEl.textContent = "曲线模式：已设置起点，请点击控制点。";
+      } else if (!curveControl) {
+        curveControl = p;
+        statusEl.textContent = "曲线模式：已设置控制点，请点击终点。";
+      } else {
+        const end = p;
+        setStrokeStyle();
+        ctx.beginPath();
+        ctx.moveTo(curveStart.x, curveStart.y);
+        ctx.quadraticCurveTo(curveControl.x, curveControl.y, end.x, end.y);
+        ctx.stroke();
+        curveStart = null;
+        curveControl = null;
+        statusEl.textContent = "曲线已绘制。";
+      }
+      return;
+    }
+
+    drawing = true;
     setStrokeStyle();
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
   });
   window.addEventListener("mousemove", (ev) => {
-    if (!drawing) return;
+    if (!drawing || (toolMode !== "pen" && toolMode !== "eraser")) return;
     const p = point(ev);
     setStrokeStyle();
     ctx.lineTo(p.x, p.y);
     ctx.stroke();
   });
-  window.addEventListener("mouseup", () => {
+  window.addEventListener("mouseup", (ev) => {
+    if (toolMode === "line" && lineStart) {
+      const p = point(ev);
+      setStrokeStyle();
+      ctx.beginPath();
+      ctx.moveTo(lineStart.x, lineStart.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      lineStart = null;
+      statusEl.textContent = "直线已绘制。";
+    }
     drawing = false;
   });
 
@@ -1205,15 +1251,40 @@ function initDrawSymbolPad(opts: {
   });
 
   bindOptionalClick("btn-draw-symbol-pen", () => {
-    eraseMode = false;
+    toolMode = "pen";
+    curveStart = null;
+    curveControl = null;
     updateToolState();
+    statusEl.textContent = "已切换到画笔模式。";
   }, log);
   bindOptionalClick("btn-draw-symbol-eraser", () => {
-    eraseMode = true;
+    toolMode = "eraser";
+    curveStart = null;
+    curveControl = null;
     updateToolState();
+    statusEl.textContent = "已切换到橡皮擦模式。";
+  }, log);
+  bindOptionalClick("btn-draw-symbol-line", () => {
+    toolMode = "line";
+    lineStart = null;
+    curveStart = null;
+    curveControl = null;
+    updateToolState();
+    statusEl.textContent = "已切换到直线模式。";
+  }, log);
+  bindOptionalClick("btn-draw-symbol-curve", () => {
+    toolMode = "curve";
+    lineStart = null;
+    curveStart = null;
+    curveControl = null;
+    updateToolState();
+    statusEl.textContent = "已切换到曲线模式：依次点击起点→控制点→终点。";
   }, log);
   bindOptionalClick("btn-draw-symbol-clear", () => {
     clearCanvas();
+    lineStart = null;
+    curveStart = null;
+    curveControl = null;
     statusEl.textContent = "画板已清空。";
   }, log);
 
