@@ -161,11 +161,17 @@ def save_sample(
     rel_mask = f"{sample_dir}/mask.png"
     rel_scene = f"{sample_dir}/scene.json"
     rel_label = f"{sample_dir}/label.json"
+    rel_image_with_mask = f"{sample_dir}/image_with_mask.png"
 
     p_image = storage.put_bytes(rel_image, image_bytes)
     p_mask = storage.put_bytes(rel_mask, mask_bytes)
     p_scene = storage.put_json(rel_scene, scene_obj)
     p_label = storage.put_json(rel_label, label_obj)
+
+    overlay_bytes = _compose_image_with_mask(image_bytes, mask_bytes)
+    p_image_with_mask: Optional[str] = None
+    if overlay_bytes:
+        p_image_with_mask = storage.put_bytes(rel_image_with_mask, overlay_bytes)
 
     hashes = {
         "image": _sha256_bytes(image_bytes),
@@ -173,11 +179,17 @@ def save_sample(
         "scene": _sha256_json(scene_obj),
         "label": _sha256_json(label_obj),
     }
+    if overlay_bytes:
+        hashes["image_with_mask"] = _sha256_bytes(overlay_bytes)
+
+    paths = {"image": p_image, "mask": p_mask, "scene": p_scene, "label": p_label}
+    if p_image_with_mask:
+        paths["image_with_mask"] = p_image_with_mask
 
     return {
         "ok": True,
         "sample_id": sid,
-        "paths": {"image": p_image, "mask": p_mask, "scene": p_scene, "label": p_label},
+        "paths": paths,
         "hashes": hashes,
         "timestamp": _now_iso(),
     }

@@ -268,6 +268,15 @@ def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> 
     return out.getvalue()
 
 
+def _decode_mask_png(mask_png: bytes) -> np.ndarray:
+    import io
+
+    from PIL import Image  # type: ignore
+
+    img = Image.open(io.BytesIO(mask_png)).convert("L")
+    return np.asarray(img, dtype=np.uint8)
+
+
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
     import io
 
@@ -459,7 +468,7 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
     if settings is None:
         raise RuntimeError("Settings not available")
 
-    from ..core_logic.mask_gen import decode_png, encode_png, generate_mask  # type: ignore
+    from ..core_logic.mask_gen import encode_png, generate_mask  # type: ignore
     from ..core_logic.occlusion import compute_label  # type: ignore
     from ..core_logic.topology import shuffle_scene  # type: ignore
     from ..services.exporter import save_sample  # type: ignore
@@ -516,7 +525,7 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
                 seed=seed,
             )
             mask_png = encode_png(mask_np)
-            mask_np_decoded = decode_png(mask_png)
+            mask_np_decoded = _decode_mask_png(mask_png)
             label = compute_label(
                 scene=scene_item,
                 mask=mask_np_decoded,
