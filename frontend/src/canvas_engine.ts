@@ -1024,17 +1024,6 @@ export class CanvasEngine {
         ctx.fillText("避障失败", mid.x + 8, mid.y - 8);
       }
 
-      const pStart = path[0];
-      const pEnd = path[path.length - 1];
-      for (const p of [pStart, pEnd]) {
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = isSel ? "#1e88e5" : "#222";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
       ctx.restore();
     }
 
