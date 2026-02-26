@@ -34,6 +34,7 @@
 
         <button id="btn-export-image" type="button" class="btn">导出 image.png</button>
         <button id="btn-export-mask" type="button" class="btn">导出 mask.png</button>
+        <button id="btn-export-composite" type="button" class="btn">导出 image_with_mask.png</button>
         <button id="btn-export-local" type="button" class="btn btn--primary">导出本地样本包</button>
       </div>
 
@@ -375,6 +376,11 @@
                 <option value="frontend_fast" selected>前端快速（近似）</option>
                 <option value="backend_precise">后端精确</option>
               </select>
+            </label>
+
+            <label class="field" title="开启后会在场景或 mask 变化后自动计算 label（带防抖）">
+              <span class="field__label">自动计算 Label</span>
+              <input id="label-auto-compute" type="checkbox" checked />
             </label>
 
             <label class="field">
