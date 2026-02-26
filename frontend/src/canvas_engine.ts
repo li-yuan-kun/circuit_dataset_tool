@@ -1,6 +1,14 @@
 import type { Scene, Endpoint, Point, Resolution, Node, Net } from "./modules/types";
 
 export type CanvasEngineOptions = { resolution: Resolution; vocab: any };
+export type NodeRenderMode = "symbol" | "box";
+export type NodeRenderOptions = {
+  mode?: NodeRenderMode;
+  strokeScale?: number;
+  showTypeLabelOnSymbol?: boolean;
+};
+
+type CustomSymbol = { img: HTMLImageElement };
 
 function deepCopy<T>(obj: T): T {
   // structuredClone 在现代浏览器可用；否则退回 JSON
@@ -71,6 +79,280 @@ function rotateXY(x: number, y: number, rad: number): { x: number; y: number } {
   return { x: x * c - y * s, y: x * s + y * c };
 }
 
+function drawResistorSymbol(ctx: CanvasRenderingContext2D, w: number): void {
+  const start = -w / 2;
+  const end = w / 2;
+  const bodyW = Math.min(w, Math.max(30, w * 0.62));
+  const bodyStart = -bodyW / 2;
+  const bodyEnd = bodyW / 2;
+  const zigCount = 7;
+  const step = (bodyEnd - bodyStart) / zigCount;
+  const amp = Math.max(6, Math.min(11, bodyW * 0.16));
+
+  ctx.beginPath();
+  ctx.moveTo(start, 0);
+  ctx.lineTo(bodyStart, 0);
+  for (let i = 1; i <= zigCount; i++) {
+    const x = bodyStart + step * i;
+    const y = i === zigCount ? 0 : i % 2 === 1 ? -amp : amp;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(end, 0);
+  ctx.stroke();
+}
+
+function drawCapacitorSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const start = -w / 2;
+  const end = w / 2;
+  const bodyW = Math.min(w, Math.max(30, Math.min(w, h) * 0.9));
+  const plateGap = Math.max(8, bodyW * 0.14);
+  const leftPlateX = -plateGap;
+  const rightPlateX = plateGap;
+  const plateHalf = Math.max(14, Math.min(h, bodyW) * 0.42);
+
+  ctx.beginPath();
+  ctx.moveTo(start, 0);
+  ctx.lineTo(leftPlateX, 0);
+  ctx.moveTo(rightPlateX, 0);
+  ctx.lineTo(end, 0);
+  ctx.moveTo(leftPlateX, -plateHalf);
+  ctx.lineTo(leftPlateX, plateHalf);
+  ctx.moveTo(rightPlateX, -plateHalf);
+  ctx.lineTo(rightPlateX, plateHalf);
+  ctx.stroke();
+}
+
+function drawNotSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const bodyW = Math.min(w, h * 0.95);
+  const tipX = bodyW / 2 - 8;
+  const bubbleR = 5.5;
+  const bodyLeft = -bodyW / 2;
+
+  ctx.beginPath();
+  ctx.moveTo(left, 0);
+  ctx.lineTo(bodyLeft, 0);
+  ctx.moveTo(tipX + bubbleR * 2, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(bodyLeft, top);
+  ctx.lineTo(bodyLeft, bottom);
+  ctx.lineTo(tipX, 0);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(tipX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawAndFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number, bubble = false): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const bodyW = Math.max(24, Math.min(w, h) * 0.86);
+  const bodyLeft = left + Math.max(6, w * 0.08);
+  const bodyRight = Math.min(right - 8, bodyLeft + bodyW);
+  const radius = (bottom - top) / 2;
+  const centerY = 0;
+
+  const bubbleR = 5.5;
+  const outStart = bubble ? right - (bubbleR * 2 + 2) : right - 2;
+  ctx.beginPath();
+  ctx.moveTo(left, -h * 0.22);
+  ctx.lineTo(bodyLeft, -h * 0.22);
+  ctx.moveTo(left, h * 0.22);
+  ctx.lineTo(bodyLeft, h * 0.22);
+  ctx.moveTo(outStart, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(bodyLeft, top);
+  ctx.lineTo(bodyRight, top);
+  ctx.arc(bodyRight, centerY, radius, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(bodyLeft, bottom);
+  ctx.closePath();
+  ctx.stroke();
+
+  if (bubble) {
+    ctx.beginPath();
+    ctx.arc(outStart + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawOrFamilySymbol(ctx: CanvasRenderingContext2D, w: number, h: number, opts: { xor?: boolean; bubble?: boolean } = {}): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const bubbleR = 5.5;
+  const outX = opts.bubble ? right - (bubbleR * 2 + 2) : right - 2;
+  const bodyW = Math.max(24, Math.min(w, h) * 0.86);
+  const inJoinX = left + Math.max(6, w * 0.08);
+
+  // leads
+  ctx.beginPath();
+  ctx.moveTo(left, -h * 0.22);
+  ctx.lineTo(inJoinX, -h * 0.22);
+  ctx.moveTo(left, h * 0.22);
+  ctx.lineTo(inJoinX, h * 0.22);
+  ctx.moveTo(outX, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  // ANSI-like OR body
+  ctx.beginPath();
+  ctx.moveTo(inJoinX, top);
+  const bulgeX = inJoinX + bodyW * 0.58;
+  const backX = inJoinX + bodyW * 0.28;
+  ctx.quadraticCurveTo(backX, 0, inJoinX, bottom);
+  ctx.quadraticCurveTo(bulgeX, bottom, outX, 0);
+  ctx.quadraticCurveTo(bulgeX, top, inJoinX, top);
+  ctx.stroke();
+
+  if (opts.xor) {
+    ctx.beginPath();
+    ctx.moveTo(inJoinX - 7, top);
+    ctx.quadraticCurveTo(backX - 7, 0, inJoinX - 7, bottom);
+    ctx.stroke();
+  }
+
+  if (opts.bubble) {
+    ctx.beginPath();
+    ctx.arc(outX + bubbleR, 0, bubbleR, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const bottom = h / 2;
+  const bodyW = Math.min(w, h);
+  const bodyLeft = -bodyW / 2 + 4;
+  const bodyRight = bodyW / 2 - 4;
+
+  ctx.beginPath();
+  ctx.moveTo(left, -h * 0.23);
+  ctx.lineTo(bodyLeft, -h * 0.23);
+  ctx.moveTo(left, h * 0.23);
+  ctx.lineTo(bodyLeft, h * 0.23);
+  ctx.moveTo(bodyRight, 0);
+  ctx.lineTo(right, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(bodyLeft, top);
+  ctx.lineTo(bodyLeft, bottom);
+  ctx.lineTo(bodyRight, 0);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.font = "12px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#111";
+  ctx.fillText("+", bodyLeft + 12, -h * 0.2);
+  ctx.fillText("−", bodyLeft + 12, h * 0.2);
+}
+
+function drawGroundSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const left = -w / 2;
+  const right = w / 2;
+  const top = -h / 2;
+  const y0 = h * 0.02;
+  const step = Math.max(10, h * 0.16);
+  ctx.beginPath();
+  ctx.moveTo(0, top);
+  ctx.lineTo(0, y0);
+  ctx.moveTo(left * 0.46, y0);
+  ctx.lineTo(right * 0.46, y0);
+  ctx.moveTo(left * 0.3, y0 + step);
+  ctx.lineTo(right * 0.3, y0 + step);
+  ctx.moveTo(left * 0.16, y0 + step * 2);
+  ctx.lineTo(right * 0.16, y0 + step * 2);
+  ctx.stroke();
+}
+
+function drawSourceSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const r = Math.max(12, Math.min(w, h) * 0.3);
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, 0);
+  ctx.lineTo(-r, 0);
+  ctx.moveTo(r, 0);
+  ctx.lineTo(w / 2, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.5, 0);
+  ctx.quadraticCurveTo(-r * 0.25, -r * 0.35, 0, 0);
+  ctx.quadraticCurveTo(r * 0.25, r * 0.35, r * 0.5, 0);
+  ctx.stroke();
+}
+
+function drawComponentSymbol(ctx: CanvasRenderingContext2D, type: string, w: number, h: number): boolean {
+  switch (String(type).toUpperCase()) {
+    case "R":
+    case "RESISTOR":
+      drawResistorSymbol(ctx, w);
+      return true;
+    case "C":
+    case "CAPACITOR":
+      drawCapacitorSymbol(ctx, w, h);
+      return true;
+    case "NOT":
+    case "INV":
+    case "INVERTER":
+      drawNotSymbol(ctx, w, h);
+      return true;
+    case "AND":
+      drawAndFamilySymbol(ctx, w, h, false);
+      return true;
+    case "NAND":
+      drawAndFamilySymbol(ctx, w, h, true);
+      return true;
+    case "OR":
+      drawOrFamilySymbol(ctx, w, h);
+      return true;
+    case "NOR":
+      drawOrFamilySymbol(ctx, w, h, { bubble: true });
+      return true;
+    case "XOR":
+      drawOrFamilySymbol(ctx, w, h, { xor: true });
+      return true;
+    case "XNOR":
+      drawOrFamilySymbol(ctx, w, h, { xor: true, bubble: true });
+      return true;
+    case "COMPARATOR":
+      drawComparatorSymbol(ctx, w, h);
+      return true;
+    case "GND":
+    case "GROUND":
+      drawGroundSymbol(ctx, w, h);
+      return true;
+    case "V":
+    case "VSOURCE":
+    case "VCC":
+      drawSourceSymbol(ctx, w, h);
+      return true;
+    default:
+      return false;
+  }
+}
+
 type BBox = { x0: number; y0: number; x1: number; y1: number };
 
 function makeSeededRandom(seed: number): () => number {
@@ -95,6 +377,10 @@ export class CanvasEngine {
   private readonly pathCache = new Map<string, { hash: string; path: Point[]; failed: boolean }>();
   private pendingPathRefreshNodes = new Set<string>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private nodeRenderMode: NodeRenderMode = "symbol";
+  private nodeStrokeScale = 1;
+  private showTypeLabelOnSymbol = false;
+  private readonly customSymbols = new Map<string, CustomSymbol>();
 
   constructor(opts: CanvasEngineOptions) {
     this.resolution = opts.resolution;
@@ -150,6 +436,26 @@ export class CanvasEngine {
   clear(): void {
     this.scene = this.makeEmptyScene();
     this.sel = null;
+  }
+
+  setNodeRenderOptions(opts: NodeRenderOptions): void {
+    if (opts.mode === "symbol" || opts.mode === "box") this.nodeRenderMode = opts.mode;
+    if (Number.isFinite(opts.strokeScale)) this.nodeStrokeScale = Math.max(0.5, Math.min(3, Number(opts.strokeScale)));
+    if (typeof opts.showTypeLabelOnSymbol === "boolean") this.showTypeLabelOnSymbol = opts.showTypeLabelOnSymbol;
+  }
+
+  setCustomSymbol(type: string, img: HTMLImageElement): void {
+    if (!type) return;
+    this.customSymbols.set(String(type), { img });
+  }
+
+  clearCustomSymbol(type: string): void {
+    if (!type) return;
+    this.customSymbols.delete(String(type));
+  }
+
+  hasCustomSymbol(type: string): boolean {
+    return this.customSymbols.has(String(type));
   }
 
   addNode(type: string, pos: Point): string {
@@ -746,21 +1052,48 @@ export class CanvasEngine {
       ctx.save();
       ctx.translate(n.pos.x, n.pos.y);
       ctx.rotate(rotToRad(n.rot));
-      ctx.fillStyle = "#f6f6f6";
       ctx.strokeStyle = isSel ? "#1e88e5" : "#333";
-      ctx.lineWidth = isSel ? 3 : 2;
+      ctx.lineWidth = (isSel ? 3 : 2) * this.nodeStrokeScale;
 
-      ctx.beginPath();
-      ctx.rect(-bw / 2, -bh / 2, bw, bh);
-      ctx.fill();
-      ctx.stroke();
+      let rendered = false;
+      const custom = this.customSymbols.get(String(n.type));
+      const hasCustom = Boolean(custom?.img?.complete);
+      if (this.nodeRenderMode === "symbol") {
+        const symbolSpan = Math.min(bw, bh);
+        const sw = symbolSpan;
+        const sh = symbolSpan;
+        if (hasCustom && custom) {
+          const iw = custom.img.naturalWidth || bw;
+          const ih = custom.img.naturalHeight || bh;
+          const fit = Math.min(sw / iw, sh / ih);
+          const dw = iw * fit;
+          const dh = ih * fit;
+          ctx.drawImage(custom.img, -dw / 2, -dh / 2, dw, dh);
+          rendered = true;
+        } else {
+          rendered = drawComponentSymbol(ctx, n.type, sw, sh);
+        }
+      }
+      if (!hasCustom && (!rendered || this.nodeRenderMode === "box")) {
+        ctx.fillStyle = "#f6f6f6";
+        ctx.beginPath();
+        ctx.rect(-bw / 2, -bh / 2, bw, bh);
+        ctx.fill();
+        ctx.stroke();
 
-      // type text
-      ctx.fillStyle = "#111";
-      ctx.font = "14px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(n.type, 0, 0);
+        // fallback text
+        ctx.fillStyle = "#111";
+        ctx.font = "14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(n.type, 0, 0);
+      } else if (this.showTypeLabelOnSymbol) {
+        ctx.fillStyle = "#111";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(n.type, 0, bh / 2 + 6);
+      }
 
       // pins
       const pins = iterPinsFromVocab(this.vocab, n.type);
