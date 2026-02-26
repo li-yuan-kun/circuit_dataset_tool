@@ -281,6 +281,27 @@ export class ApiClient {
     return { scene_shuffled: json.scene_shuffled ?? json.scene ?? json, meta: json.meta ?? {} };
   }
 
+
+
+  async submitJob(payload: Record<string, any>): Promise<{ job_id: string }> {
+    const url = joinUrl(this.baseUrl, "/jobs");
+    const resp = await this.fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    });
+    if (!resp.ok) throw parseError(resp.status, await safeReadJson(resp));
+    const json = await resp.json();
+    return { job_id: String(json.job_id) };
+  }
+
+  async getJobStatus(jobId: string): Promise<Record<string, any>> {
+    const url = joinUrl(this.baseUrl, `/jobs/${encodeURIComponent(jobId)}`);
+    const resp = await this.fetchWithTimeout(url, { method: "GET" });
+    if (!resp.ok) throw parseError(resp.status, await safeReadJson(resp));
+    return await resp.json();
+  }
+
   async saveSampleMultipart(payload: {
     imagePng: Blob;
     maskPng: Blob;

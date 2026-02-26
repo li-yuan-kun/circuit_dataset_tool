@@ -361,7 +361,7 @@ function makeSeededRandom(seed: number): () => number {
 }
 
 export class CanvasEngine {
-  private readonly resolution: Resolution;
+  private resolution: Resolution;
   private readonly vocab: any;
 
   private scene: Scene;
@@ -432,6 +432,15 @@ export class CanvasEngine {
     this.scene = this.makeEmptyScene();
     this.sel = null;
   }
+
+  setResolution(resolution: Resolution): void {
+    const w = Math.max(1, Math.floor(Number(resolution?.w ?? this.resolution.w)));
+    const h = Math.max(1, Math.floor(Number(resolution?.h ?? this.resolution.h)));
+    this.resolution = { w, h };
+    this.scene.meta = this.scene.meta || {};
+    this.scene.meta.resolution = { w, h };
+  }
+
 
   setNodeRenderOptions(opts: NodeRenderOptions): void {
     if (opts.mode === "symbol" || opts.mode === "box") this.nodeRenderMode = opts.mode;
