@@ -1059,19 +1059,16 @@ export class CanvasEngine {
       const custom = this.customSymbols.get(String(n.type));
       const hasCustom = Boolean(custom?.img?.complete);
       if (this.nodeRenderMode === "symbol") {
-        const symbolSpan = Math.min(bw, bh);
-        const sw = symbolSpan;
-        const sh = symbolSpan;
         if (hasCustom && custom) {
           const iw = custom.img.naturalWidth || bw;
           const ih = custom.img.naturalHeight || bh;
-          const fit = Math.min(sw / iw, sh / ih);
+          const fit = Math.min(bw / iw, bh / ih);
           const dw = iw * fit;
           const dh = ih * fit;
           ctx.drawImage(custom.img, -dw / 2, -dh / 2, dw, dh);
           rendered = true;
         } else {
-          rendered = drawComponentSymbol(ctx, n.type, sw, sh);
+          rendered = drawComponentSymbol(ctx, n.type, bw, bh);
         }
       }
       if (!hasCustom && (!rendered || this.nodeRenderMode === "box")) {
