@@ -253,12 +253,14 @@ function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.closePath();
   ctx.stroke();
 
-  ctx.font = "12px sans-serif";
+  const markerFontSize = Math.max(10, Math.min(22, Math.min(w, h) * 0.22));
+  const markerX = bodyLeft + Math.max(10, Math.min(bodyW * 0.18, 16));
+  ctx.font = `${markerFontSize}px sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#ff0000";
-  ctx.fillText("+", bodyLeft + 12, -h * 0.2);
-  ctx.fillText("−", bodyLeft + 12, h * 0.2);
+  ctx.fillText("+", markerX, -h * 0.2);
+  ctx.fillText("−", markerX, h * 0.2);
 }
 
 function drawGroundSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -1038,7 +1040,7 @@ export class CanvasEngine {
 
       ctx.lineWidth = (isSel ? 3 : 2) * this.netStrokeScale;
       const routeFailed = String((e as any).route_status ?? "") === "failed";
-      ctx.strokeStyle = routeFailed ? "#ffffff" : "#ff0000";
+      ctx.strokeStyle = routeFailed ? "#00ff00" : "#ff0000";
       ctx.stroke();
 
       if (routeFailed) {
