@@ -1037,6 +1037,13 @@ export async function bootstrapApp(): Promise<void> {
             if (useBackendShuffle) {
               const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
               sceneItem = shuffled.scene_shuffled ?? baseScene;
+              const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
+              if (failedNets > 0) {
+                throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets})`);
+              }
+            }
+            if (sceneHasRouteFailure(sceneItem)) {
+              throw new Error("route obstacle-avoid failed; skip this sample");
             }
             if (sceneHasRouteFailure(sceneItem)) {
               throw new Error("route obstacle-avoid failed; skip this sample");

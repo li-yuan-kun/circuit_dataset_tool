@@ -311,6 +311,20 @@ def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
             return True
     return False
 
+
+
+def _shuffle_meta_has_route_failure(meta: Dict[str, Any] | None) -> bool:
+    """True when shuffle metadata reports at least one failed routed net."""
+    if not isinstance(meta, dict):
+        return False
+    rs = meta.get("route_stats")
+    if not isinstance(rs, dict):
+        return False
+    try:
+        return int(rs.get("failed") or 0) > 0
+    except Exception:
+        return False
+
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
     import io
 
@@ -541,14 +555,18 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
         source_scene = copy.deepcopy(scenes[attempt % len(scenes)])
         try:
             scene_item = source_scene
+            shuffle_meta: Dict[str, Any] | None = None
             if use_shuffle:
-                scene_item, _ = shuffle_scene(
+                scene_item, shuffle_meta = shuffle_scene(
                     scene=source_scene,
                     vocab=footprint_db,
                     params=shuffle_params,
                     seed=seed,
                     return_paths=True,
                 )
+                # Shuffle once per attempt; if routing failed, skip and retry with next seed.
+                if _shuffle_meta_has_route_failure(shuffle_meta):
+                    raise ValueError("route obstacle-avoid failed after shuffle; retry next layout")
 
             image_png = _rasterize_scene_png(scene_item, footprint_db, settings)
             w, h = _scene_resolution(scene_item, settings)
