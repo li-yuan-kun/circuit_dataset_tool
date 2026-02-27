@@ -690,26 +690,40 @@ def route_net_orthogonal_avoid_obstacles(
     obstacles: Sequence[Tuple[float, float, float, float]],
     resolution: Tuple[int, int],
     grid_step: float = 12.0,
+    margin_cells: int = 4,
 ) -> Optional[List[Dict[str, float]]]:
     step = max(4.0, float(grid_step))
-    w = max(step * 2.0, float(resolution[0]))
-    h = max(step * 2.0, float(resolution[1]))
-    w_cells = int(math.floor(w / step)) + 1
-    h_cells = int(math.floor(h / step)) + 1
+    margin = max(1, int(margin_cells)) * step
+
+    scene_w = max(step * 2.0, float(resolution[0]))
+    scene_h = max(step * 2.0, float(resolution[1]))
+
+    points = [p0, p1, p0_out, p1_out]
+    min_x = min([0.0, *(float(p[0]) for p in points), *(float(bb[0]) for bb in obstacles)]) - margin
+    min_y = min([0.0, *(float(p[1]) for p in points), *(float(bb[1]) for bb in obstacles)]) - margin
+    max_x = max([scene_w, *(float(p[0]) for p in points), *(float(bb[2]) for bb in obstacles)]) + margin
+    max_y = max([scene_h, *(float(p[1]) for p in points), *(float(bb[3]) for bb in obstacles)]) + margin
+
+    span_w = max(step * 2.0, max_x - min_x)
+    span_h = max(step * 2.0, max_y - min_y)
+    w_cells = int(math.floor(span_w / step)) + 1
+    h_cells = int(math.floor(span_h / step)) + 1
 
     def to_grid(p: Tuple[float, float]) -> Tuple[int, int]:
-        return (int(round(p[0] / step)), int(round(p[1] / step)))
+        gx = int(round((float(p[0]) - min_x) / step))
+        gy = int(round((float(p[1]) - min_y) / step))
+        return (min(max(gx, 0), w_cells - 1), min(max(gy, 0), h_cells - 1))
 
     def to_xy(g: Tuple[int, int]) -> Tuple[float, float]:
-        return (float(g[0] * step), float(g[1] * step))
+        return (float(min_x + g[0] * step), float(min_y + g[1] * step))
 
     blocked: set[Tuple[int, int]] = set()
     for bb in obstacles:
         x0, y0, x1, y1 = bb
-        gx0 = max(0, int(math.floor(x0 / step)))
-        gy0 = max(0, int(math.floor(y0 / step)))
-        gx1 = min(w_cells - 1, int(math.ceil(x1 / step)))
-        gy1 = min(h_cells - 1, int(math.ceil(y1 / step)))
+        gx0 = max(0, int(math.floor((x0 - min_x) / step)))
+        gy0 = max(0, int(math.floor((y0 - min_y) / step)))
+        gx1 = min(w_cells - 1, int(math.ceil((x1 - min_x) / step)))
+        gy1 = min(h_cells - 1, int(math.ceil((y1 - min_y) / step)))
         for gx in range(gx0, gx1 + 1):
             for gy in range(gy0, gy1 + 1):
                 blocked.add((gx, gy))
@@ -818,16 +832,27 @@ def route_all_nets(
 
         chosen_path: List[Dict[str, float]]
         if avoid_mode:
-            ortho = route_net_orthogonal_avoid_obstacles(
-                p0,
-                p1,
-                p0_out=p0_out,
-                p1_out=p1_out,
-                obstacles=obstacles,
-                resolution=resolution,
-                grid_step=route_grid,
+            base_step = max(4.0, float(route_grid))
+            routing_trials = (
+                (base_step, 4),
+                (max(4.0, base_step * 0.75), 6),
+                (max(4.0, base_step * 0.5), 8),
+                (max(4.0, base_step * 0.35), 10),
             )
-            if ortho is not None:
+            for trial_step, margin_cells in routing_trials:
+                ortho = route_net_orthogonal_avoid_obstacles(
+                    p0,
+                    p1,
+                    p0_out=p0_out,
+                    p1_out=p1_out,
+                    obstacles=obstacles,
+                    resolution=resolution,
+                    grid_step=trial_step,
+                    margin_cells=margin_cells,
+                )
+                if ortho is None:
+                    continue
+
                 pts = [(float(it["x"]), float(it["y"])) for it in ortho]
                 endpoint_ok = not _path_hits_any_bbox(pts[1:-1], endpoint_boxes)
                 obstacle_ok = not _path_hits_any_bbox(pts, obstacles)
@@ -836,7 +861,12 @@ def route_all_nets(
                     net["route_status"] = "success"
                     net["route_constraint_satisfied"] = True
                     stats["success"] += 1
-                    continue
+                    break
+            else:
+                ortho = None
+
+            if ortho is not None and str(net.get("route_status") or "") == "success":
+                continue
 
             fallback = route_net_two_seg(p0, p1, p0_out=p0_out, p1_out=p1_out, bend_mode="hv")
             fpts = [(float(it["x"]), float(it["y"])) for it in fallback]
