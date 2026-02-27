@@ -59,13 +59,12 @@ def _compose_image_with_mask(image_bytes: bytes, mask_bytes: bytes) -> Optional[
         if image.size != mask.size:
             mask = mask.resize(image.size)
 
-        arr = np.asarray(image, dtype=np.uint8)
-        gray = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(np.uint8)
+        arr = np.asarray(image, dtype=np.uint8).copy()
         mask_arr = np.asarray(mask, dtype=np.uint8) > 0
-        gray[mask_arr] = 0
+        arr[mask_arr] = (255, 255, 255)
 
         out = io.BytesIO()
-        Image.fromarray(gray, mode="L").save(out, format="PNG")
+        Image.fromarray(arr, mode="RGB").save(out, format="PNG")
         return out.getvalue()
     except Exception:
         return None
