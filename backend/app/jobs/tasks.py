@@ -298,47 +298,70 @@ def _decode_mask_png(mask_png: bytes) -> np.ndarray:
 
 
 
-def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
-    """Return True when obstacle-avoid routing explicitly failed."""
+def _scene_route_status_counts(scene: Dict[str, Any]) -> Dict[str, int]:
+    counts = {"failed": 0, "degraded": 0}
     nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
     if not isinstance(nets, list):
-        return False
+        return counts
+
     for net in nets:
         if not isinstance(net, dict):
             continue
         status = str(net.get("route_status") or "").strip().lower()
-        if status in {"failed", "degraded"}:
-            return True
-    return False
+        if status in counts:
+            counts[status] += 1
+    return counts
 
 
 
-def _shuffle_has_obstacle_avoid_failure(scene: Dict[str, Any], meta: Dict[str, Any] | None) -> bool:
-    """Check shuffled layout for obstacle-avoid failures (failed/degraded)."""
+def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
+    """Return True only when obstacle-avoid routing explicitly failed."""
+    return _scene_route_status_counts(scene).get("failed", 0) > 0
+
+
+
+def _shuffle_has_obstacle_avoid_failure(
+    scene: Dict[str, Any],
+    meta: Dict[str, Any] | None,
+    *,
+    reject_degraded_routes: bool = False,
+) -> bool:
+    """Check shuffled layout for obstacle-avoid hard failures.
+
+    Degraded routes are accepted by default and can be rejected via strict mode.
+    """
     route_mode = str((meta or {}).get("route_mode") or "").strip().lower()
     if route_mode not in {"avoid_obstacles", "obstacle_avoid", "orthogonal_avoid"}:
         return False
 
     route_stats = (meta or {}).get("route_stats") if isinstance(meta, dict) else None
+    failed = 0
+    degraded = 0
     if isinstance(route_stats, dict):
         try:
-            if int(route_stats.get("failed") or 0) > 0:
-                return True
-            if int(route_stats.get("degraded") or 0) > 0:
-                return True
+            failed = int(route_stats.get("failed") or 0)
+            degraded = int(route_stats.get("degraded") or 0)
         except Exception:
-            pass
+            failed = 0
+            degraded = 0
 
-    nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
-    if not isinstance(nets, list):
-        return False
+    if failed > 0:
+        return True
+    if degraded > 0 and reject_degraded_routes:
+        return True
+    if degraded > 0:
+        logger.warning("degraded routes found in shuffle stats but accepted: degraded=%s", degraded)
 
-    for net in nets:
-        if not isinstance(net, dict):
-            continue
-        status = str(net.get("route_status") or "").strip().lower()
-        if status in {"failed", "degraded"}:
-            return True
+    scene_counts = _scene_route_status_counts(scene)
+    if scene_counts.get("failed", 0) > 0:
+        return True
+    if scene_counts.get("degraded", 0) > 0 and reject_degraded_routes:
+        return True
+    if scene_counts.get("degraded", 0) > 0:
+        logger.warning(
+            "degraded routes found in shuffled scene but accepted: degraded=%s",
+            scene_counts.get("degraded", 0),
+        )
     return False
 
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
@@ -556,6 +579,7 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
     function_name = str((payload or {}).get("function") or "UNKNOWN")
     save_prefix = str((payload or {}).get("sample_prefix") or f"batch_{_now_compact()}_")
     make_zip = bool((payload or {}).get("zip", False))
+    reject_degraded_routes = bool((payload or {}).get("reject_degraded_routes", False))
 
     rel_dir = _job_rel_dir(job_id or _new_job_id())
     storage.ensure_dir(rel_dir)
@@ -572,6 +596,11 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
         try:
             scene_item = source_scene
             shuffle_meta: Dict[str, Any] | None = None
+            route_meta: Dict[str, Any] = {
+                "failed": 0,
+                "degraded": 0,
+                "strict_reject_degraded": reject_degraded_routes,
+            }
             if use_shuffle:
                 scene_item, shuffle_meta = shuffle_scene(
                     scene=source_scene,
@@ -580,9 +609,33 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
                     seed=seed,
                     return_paths=True,
                 )
-                # Shuffle once per attempt; if routing failed, skip and retry with next seed.
-                if _shuffle_has_obstacle_avoid_failure(scene_item, shuffle_meta):
-                    raise ValueError("route obstacle-avoid failed after shuffle; retry next layout")
+
+                route_stats = (shuffle_meta or {}).get("route_stats") if isinstance(shuffle_meta, dict) else None
+                if isinstance(route_stats, dict):
+                    try:
+                        route_meta["failed"] = int(route_stats.get("failed") or 0)
+                        route_meta["degraded"] = int(route_stats.get("degraded") or 0)
+                    except Exception:
+                        route_meta["failed"] = 0
+                        route_meta["degraded"] = 0
+
+                scene_route_counts = _scene_route_status_counts(scene_item)
+                route_meta["failed"] = max(int(route_meta.get("failed") or 0), scene_route_counts.get("failed", 0))
+                route_meta["degraded"] = max(int(route_meta.get("degraded") or 0), scene_route_counts.get("degraded", 0))
+
+                # Shuffle once per attempt; hard failures retry. Degraded only retries in strict mode.
+                if _shuffle_has_obstacle_avoid_failure(
+                    scene_item,
+                    shuffle_meta,
+                    reject_degraded_routes=reject_degraded_routes,
+                ):
+                    if int(route_meta.get("failed") or 0) > 0:
+                        raise ValueError("hard route failure after shuffle; retry next layout")
+                    raise ValueError("degraded route rejected by strict mode after shuffle; retry next layout")
+
+            scene_route_counts = _scene_route_status_counts(scene_item)
+            route_meta["failed"] = max(int(route_meta.get("failed") or 0), scene_route_counts.get("failed", 0))
+            route_meta["degraded"] = max(int(route_meta.get("degraded") or 0), scene_route_counts.get("degraded", 0))
 
             image_png = _rasterize_scene_png(scene_item, footprint_db, settings)
             w, h = _scene_resolution(scene_item, settings)
@@ -598,7 +651,7 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
             if int(np.count_nonzero(mask_np_decoded)) <= 0:
                 raise ValueError("mask generation produced an empty mask")
             if _scene_has_route_failure(scene_item):
-                raise ValueError("route obstacle-avoid failed; skip this sample")
+                raise ValueError("hard route failure detected; skip this sample")
             label = compute_label(
                 scene=scene_item,
                 mask=mask_np_decoded,
@@ -632,6 +685,12 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
                 ),
             )
 
+            mask_meta_out = dict(mask_meta or {})
+            mask_meta_out["route_quality"] = {
+                "failed": int(route_meta.get("failed") or 0),
+                "degraded": int(route_meta.get("degraded") or 0),
+                "strict_reject_degraded": reject_degraded_routes,
+            }
             out_items.append(
                 {
                     "index": succeeded,
@@ -645,13 +704,24 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
                         "label": saved_paths.get("label"),
                         "scene": saved_paths.get("scene"),
                     },
-                    "mask_meta": mask_meta,
+                    "mask_meta": mask_meta_out,
                 }
             )
             succeeded += 1
         except Exception as e:
             failed += 1
-            attempt_errors.append({"attempt": attempt, "seed": seed, "error": str(e)})
+            error_text = str(e)
+            failure_type = "unknown"
+            if "hard route failure" in error_text:
+                failure_type = "hard_failed"
+            elif "degraded route rejected" in error_text:
+                failure_type = "degraded_rejected"
+            attempt_errors.append({
+                "attempt": attempt,
+                "seed": seed,
+                "failure_type": failure_type,
+                "error": error_text,
+            })
         finally:
             attempt += 1
 
