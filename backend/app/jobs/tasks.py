@@ -299,7 +299,7 @@ def _decode_mask_png(mask_png: bytes) -> np.ndarray:
 
 
 def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
-    """Return True when any net indicates route obstacle-avoid failed/violated."""
+    """Return True when obstacle-avoid routing explicitly failed."""
     nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
     if not isinstance(nets, list):
         return False
@@ -307,9 +307,7 @@ def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
         if not isinstance(net, dict):
             continue
         status = str(net.get("route_status") or "").strip().lower()
-        if status in {"failed", "degraded"}:
-            return True
-        if net.get("route_constraint_satisfied") is False:
+        if status == "failed":
             return True
     return False
 

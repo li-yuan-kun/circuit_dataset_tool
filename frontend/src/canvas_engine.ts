@@ -256,7 +256,7 @@ function drawComparatorSymbol(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.font = "12px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = "#111";
+  ctx.fillStyle = "#ff0000";
   ctx.fillText("+", bodyLeft + 12, -h * 0.2);
   ctx.fillText("−", bodyLeft + 12, h * 0.2);
 }
