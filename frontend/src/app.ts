@@ -992,11 +992,7 @@ export async function bootstrapApp(): Promise<void> {
 
     const sceneHasObstacleAvoidFailure = (scene: Scene): boolean => {
       const nets = Array.isArray(scene?.nets) ? scene.nets : [];
-      return nets.some((net) => {
-        const status = String((net as any)?.route_status ?? "").toLowerCase();
-        if (status === "failed") return true;
-        return (net as any)?.route_constraint_satisfied === false;
-      });
+      return nets.some((net) => String((net as any)?.route_status ?? "").toLowerCase() === "failed");
     };
 
     const maskBlobHasCoverage = async (blob: Blob): Promise<boolean> => {

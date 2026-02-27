@@ -329,8 +329,6 @@ def _shuffle_has_obstacle_avoid_failure(scene: Dict[str, Any], meta: Dict[str, A
         status = str(net.get("route_status") or "").strip().lower()
         if status == "failed":
             return True
-        if net.get("route_constraint_satisfied") is False:
-            return True
     return False
 
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
