@@ -5,6 +5,7 @@ export type NodeRenderMode = "symbol" | "box";
 export type NodeRenderOptions = {
   mode?: NodeRenderMode;
   strokeScale?: number;
+  netStrokeScale?: number;
   showTypeLabelOnSymbol?: boolean;
 };
 
@@ -374,6 +375,7 @@ export class CanvasEngine {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private nodeRenderMode: NodeRenderMode = "symbol";
   private nodeStrokeScale = 1;
+  private netStrokeScale = 1;
   private showTypeLabelOnSymbol = false;
   private readonly customSymbols = new Map<string, CustomSymbol>();
 
@@ -445,6 +447,7 @@ export class CanvasEngine {
   setNodeRenderOptions(opts: NodeRenderOptions): void {
     if (opts.mode === "symbol" || opts.mode === "box") this.nodeRenderMode = opts.mode;
     if (Number.isFinite(opts.strokeScale)) this.nodeStrokeScale = Math.max(0.5, Math.min(3, Number(opts.strokeScale)));
+    if (Number.isFinite(opts.netStrokeScale)) this.netStrokeScale = Math.max(0.5, Math.min(4, Number(opts.netStrokeScale)));
     if (typeof opts.showTypeLabelOnSymbol === "boolean") this.showTypeLabelOnSymbol = opts.showTypeLabelOnSymbol;
   }
 
@@ -1000,7 +1003,7 @@ export class CanvasEngine {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
 
@@ -1026,21 +1029,21 @@ export class CanvasEngine {
       ctx.save();
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      ctx.lineWidth = isSel ? 6 : 5;
-      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = (isSel ? 6 : 5) * this.netStrokeScale;
+      ctx.strokeStyle = "#ff0000";
       ctx.beginPath();
       ctx.moveTo(path[0].x, path[0].y);
       for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
       ctx.stroke();
 
-      ctx.lineWidth = isSel ? 3 : 2;
+      ctx.lineWidth = (isSel ? 3 : 2) * this.netStrokeScale;
       const routeFailed = String((e as any).route_status ?? "") === "failed";
-      ctx.strokeStyle = routeFailed ? "#e53935" : (isSel ? "#1e88e5" : "#444");
+      ctx.strokeStyle = routeFailed ? "#ffffff" : "#ff0000";
       ctx.stroke();
 
       if (routeFailed) {
         const mid = path[Math.floor(path.length / 2)] ?? path[0];
-        ctx.fillStyle = "#e53935";
+        ctx.fillStyle = "#ffffff";
         ctx.font = "12px sans-serif";
         ctx.fillText("避障失败", mid.x + 8, mid.y - 8);
       }
@@ -1060,7 +1063,7 @@ export class CanvasEngine {
       ctx.save();
       ctx.translate(n.pos.x, n.pos.y);
       ctx.rotate(rotToRad(n.rot));
-      ctx.strokeStyle = isSel ? "#1e88e5" : "#333";
+      ctx.strokeStyle = "#ff0000";
       ctx.lineWidth = (isSel ? 3 : 2) * this.nodeStrokeScale;
 
       let rendered = false;
@@ -1080,20 +1083,20 @@ export class CanvasEngine {
         }
       }
       if (!hasCustom && (!rendered || this.nodeRenderMode === "box")) {
-        ctx.fillStyle = "#f6f6f6";
+        ctx.fillStyle = "#000000";
         ctx.beginPath();
         ctx.rect(-bw / 2, -bh / 2, bw, bh);
         ctx.fill();
         ctx.stroke();
 
         // fallback text
-        ctx.fillStyle = "#111";
+        ctx.fillStyle = "#ff0000";
         ctx.font = "14px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(n.type, 0, 0);
       } else if (this.showTypeLabelOnSymbol) {
-        ctx.fillStyle = "#111";
+        ctx.fillStyle = "#ff0000";
         ctx.font = "12px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
@@ -1105,9 +1108,9 @@ export class CanvasEngine {
       if (pins.length) {
         const pinOuter = Math.max(0.8, Math.min(3.2, Math.min(bw, bh) * 0.14));
         const pinInner = Math.max(0.5, pinOuter * 0.68);
-        ctx.fillStyle = "#111";
+        ctx.fillStyle = "#ff0000";
         for (const p of pins) {
-          ctx.strokeStyle = "#fff";
+          ctx.strokeStyle = "#ff0000";
           ctx.lineWidth = Math.max(0.5, pinOuter * 0.4);
           ctx.beginPath();
           ctx.arc(p.x * s, p.y * s, pinOuter, 0, Math.PI * 2);
