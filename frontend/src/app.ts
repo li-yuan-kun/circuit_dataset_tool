@@ -1043,6 +1043,7 @@ export async function bootstrapApp(): Promise<void> {
     const runBatchMvp = async (): Promise<void> => {
       const baseScene = syncScene();
       const concurrency = 1;
+      let warnedShuffleFallback = false;
       let nextIndex = 0;
       let succeeded = 0;
       let failed = 0;
@@ -1060,6 +1061,13 @@ export async function bootstrapApp(): Promise<void> {
         }
       };
 
+      const localShuffleScene = (scene: Scene, seed: number): Scene => {
+        const tempEngine = new CanvasEngine({ resolution, vocab });
+        tempEngine.loadScene(scene);
+        tempEngine.shuffleNodePositions(seed, toNum(byId<HTMLInputElement>("shuffle-margin").value, 20));
+        return tempEngine.serializeScene();
+      };
+
       const worker = async (): Promise<void> => {
         while (true) {
           if (succeeded >= n) return;
@@ -1072,15 +1080,24 @@ export async function bootstrapApp(): Promise<void> {
           const processOne = async (): Promise<void> => {
             let sceneItem = baseScene;
             if (useBackendShuffle) {
-              const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
-              sceneItem = shuffled.scene_shuffled ?? baseScene;
-              previewShuffleScene(sceneItem, index, seed);
-              const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
-              const degradedNets = Number(shuffled?.meta?.route_stats?.degraded ?? 0);
-              if (failedNets > 0 || degradedNets > 0) {
-                throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets}, degraded=${degradedNets})`);
+              try {
+                const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
+                sceneItem = shuffled.scene_shuffled ?? baseScene;
+                const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
+                const degradedNets = Number(shuffled?.meta?.route_stats?.degraded ?? 0);
+                if (failedNets > 0 || degradedNets > 0) {
+                  throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets}, degraded=${degradedNets})`);
+                }
+              } catch (err) {
+                if (!warnedShuffleFallback) {
+                  warnedShuffleFallback = true;
+                  log(`⚠️ 后端 /topology/shuffle 不可用，MVP 已切换本地 shuffle：${userFacingError(err, "shuffle失败")}`);
+                }
+                sceneItem = localShuffleScene(baseScene, seed);
               }
+              previewShuffleScene(sceneItem, index, seed);
             } else {
+              sceneItem = localShuffleScene(baseScene, seed);
               previewShuffleScene(sceneItem, index, seed);
             }
             if (sceneHasObstacleAvoidFailure(sceneItem)) {
