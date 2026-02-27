@@ -169,21 +169,21 @@ export class MaskLayer {
     }
   }
 
-  drawOverlay(ctx: CanvasRenderingContext2D, alpha: number = 0.35): void {
+  drawOverlay(ctx: CanvasRenderingContext2D, alpha: number = 1): void {
     const a = Math.max(0, Math.min(1, alpha));
     const W = this.resolution.w;
     const H = this.resolution.h;
 
-    // 将 mask（白色 alpha）叠加为黑色半透明
+    // 将 mask 区域以白色进行覆盖预览
     ctx.save();
     ctx.globalAlpha = a;
 
     // 先把 mask alpha 画上去
     ctx.drawImage(this.canvas, 0, 0);
 
-    // 再用 source-in 填充黑色：只在 mask 有 alpha 的地方着色
+    // 再用 source-in 填充白色：只在 mask 有 alpha 的地方着色
     ctx.globalCompositeOperation = "source-in";
-    ctx.fillStyle = "rgba(0,0,0,1)";
+    ctx.fillStyle = "rgba(255,255,255,1)";
     ctx.fillRect(0, 0, W, H);
 
     ctx.restore();
