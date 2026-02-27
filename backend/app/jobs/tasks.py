@@ -296,6 +296,26 @@ def _decode_mask_png(mask_png: bytes) -> np.ndarray:
     return np.asarray(img, dtype=np.uint8)
 
 
+
+
+def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
+    """Return True when any net has explicit route failure markers."""
+    nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
+    if not isinstance(nets, list):
+        return False
+    for net in nets:
+        if not isinstance(net, dict):
+            continue
+        status = str(net.get("route_status") or "").strip().lower()
+        if status == "failed":
+            return True
+        if net.get("route_constraint_satisfied") is False:
+            mode = str(net.get("route_mode_used") or "").strip().lower()
+            # hard-avoid routes that violate obstacle constraints should be skipped.
+            if mode in {"orthogonal_avoid", "fallback_two_seg", "two_seg"}:
+                return True
+    return False
+
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
     import io
 
@@ -546,6 +566,10 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
             )
             mask_png = encode_png(mask_np)
             mask_np_decoded = _decode_mask_png(mask_png)
+            if int(np.count_nonzero(mask_np_decoded)) <= 0:
+                raise ValueError("mask generation produced an empty mask")
+            if _scene_has_route_failure(scene_item):
+                raise ValueError("route obstacle-avoid failed; skip this sample")
             label = compute_label(
                 scene=scene_item,
                 mask=mask_np_decoded,

@@ -990,6 +990,30 @@ export async function bootstrapApp(): Promise<void> {
       throw lastError;
     };
 
+    const sceneHasRouteFailure = (scene: Scene): boolean => {
+      const nets = Array.isArray(scene?.nets) ? scene.nets : [];
+      return nets.some((net) => String((net as any)?.route_status ?? "").toLowerCase() === "failed");
+    };
+
+    const maskBlobHasCoverage = async (blob: Blob): Promise<boolean> => {
+      const bmp = await createImageBitmap(blob);
+      try {
+        const c = document.createElement("canvas");
+        c.width = bmp.width;
+        c.height = bmp.height;
+        const ctx = c.getContext("2d");
+        if (!ctx) return false;
+        ctx.drawImage(bmp, 0, 0);
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) return true;
+        }
+        return false;
+      } finally {
+        bmp.close();
+      }
+    };
+
     const runBatchMvp = async (): Promise<void> => {
       const baseScene = syncScene();
       const concurrency = 2;
@@ -1014,8 +1038,14 @@ export async function bootstrapApp(): Promise<void> {
               const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
               sceneItem = shuffled.scene_shuffled ?? baseScene;
             }
+            if (sceneHasRouteFailure(sceneItem)) {
+              throw new Error("route obstacle-avoid failed; skip this sample");
+            }
 
             const maskRes = await getApi().generateMask(sceneItem, maskStrategy, { ...maskParams, seed });
+            if (!(await maskBlobHasCoverage(maskRes.maskPngBlob))) {
+              throw new Error("mask generation produced an empty mask");
+            }
             const labelRes = await getApi().computeLabel(sceneItem, maskRes.maskPngBlob, occThreshold, functionName);
 
             const sceneJson = makeSceneJson(sceneItem);
