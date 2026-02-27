@@ -992,7 +992,10 @@ export async function bootstrapApp(): Promise<void> {
 
     const sceneHasObstacleAvoidFailure = (scene: Scene): boolean => {
       const nets = Array.isArray(scene?.nets) ? scene.nets : [];
-      return nets.some((net) => String((net as any)?.route_status ?? "").toLowerCase() === "failed");
+      return nets.some((net) => {
+        const st = String((net as any)?.route_status ?? "").toLowerCase();
+        return st === "failed" || st === "degraded";
+      });
     };
 
     const maskBlobHasCoverage = async (blob: Blob): Promise<boolean> => {
@@ -1038,8 +1041,9 @@ export async function bootstrapApp(): Promise<void> {
               const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
               sceneItem = shuffled.scene_shuffled ?? baseScene;
               const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
-              if (failedNets > 0) {
-                throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets})`);
+              const degradedNets = Number(shuffled?.meta?.route_stats?.degraded ?? 0);
+              if (failedNets > 0 || degradedNets > 0) {
+                throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets}, degraded=${degradedNets})`);
               }
             }
             if (sceneHasObstacleAvoidFailure(sceneItem)) {

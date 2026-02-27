@@ -307,17 +307,27 @@ def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
         if not isinstance(net, dict):
             continue
         status = str(net.get("route_status") or "").strip().lower()
-        if status == "failed":
+        if status in {"failed", "degraded"}:
             return True
     return False
 
 
 
 def _shuffle_has_obstacle_avoid_failure(scene: Dict[str, Any], meta: Dict[str, Any] | None) -> bool:
-    """Check shuffled layout for obstacle-avoid routing failures and constraint violations."""
+    """Check shuffled layout for obstacle-avoid failures (failed/degraded)."""
     route_mode = str((meta or {}).get("route_mode") or "").strip().lower()
     if route_mode not in {"avoid_obstacles", "obstacle_avoid", "orthogonal_avoid"}:
         return False
+
+    route_stats = (meta or {}).get("route_stats") if isinstance(meta, dict) else None
+    if isinstance(route_stats, dict):
+        try:
+            if int(route_stats.get("failed") or 0) > 0:
+                return True
+            if int(route_stats.get("degraded") or 0) > 0:
+                return True
+        except Exception:
+            pass
 
     nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
     if not isinstance(nets, list):
@@ -327,7 +337,7 @@ def _shuffle_has_obstacle_avoid_failure(scene: Dict[str, Any], meta: Dict[str, A
         if not isinstance(net, dict):
             continue
         status = str(net.get("route_status") or "").strip().lower()
-        if status == "failed":
+        if status in {"failed", "degraded"}:
             return True
     return False
 
