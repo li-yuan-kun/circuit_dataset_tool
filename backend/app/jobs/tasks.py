@@ -240,13 +240,12 @@ def _build_manifest_record(*, sample_id: str, saved_paths: Dict[str, Any], scene
 
 
 def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> bytes:
-    from PIL import Image  # type: ignore
+    from PIL import Image, ImageDraw  # type: ignore
 
-    from ..core_logic.mask_gen import encode_png  # type: ignore
     from ..core_logic.rasterize import render_footprint_on_canvas  # type: ignore
 
     w, h = _scene_resolution(scene, settings)
-    canvas = np.full((h, w), 255, dtype=np.uint8)
+    canvas = np.zeros((h, w, 3), dtype=np.uint8)
     for node in (scene.get("nodes") or []):
         if not isinstance(node, dict):
             continue
@@ -257,12 +256,32 @@ def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> 
             fp = render_footprint_on_canvas(node=node, footprint_db=footprint_db, resolution=(w, h))
         except Exception:
             continue
-        canvas[np.asarray(fp, dtype=np.uint8) > 0] = 0
+        canvas[np.asarray(fp, dtype=np.uint8) > 0] = (255, 0, 0)
+
+    # Draw net polylines in red so saved batch images keep visible wiring as colored output.
+    img = Image.fromarray(canvas, mode="RGB")
+    draw = ImageDraw.Draw(img)
+    for net in (scene.get("nets") or []):
+        if not isinstance(net, dict):
+            continue
+        path = net.get("path") or []
+        if not isinstance(path, list) or len(path) < 2:
+            continue
+        pts = []
+        for p in path:
+            if not isinstance(p, dict):
+                continue
+            try:
+                x = float(p.get("x"))
+                y = float(p.get("y"))
+            except Exception:
+                continue
+            pts.append((x, y))
+        if len(pts) >= 2:
+            draw.line(pts, fill=(255, 0, 0), width=3)
 
     import io
 
-    gray_png = encode_png(canvas)
-    img = Image.open(io.BytesIO(gray_png)).convert("RGB")
     out = io.BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()
@@ -277,6 +296,41 @@ def _decode_mask_png(mask_png: bytes) -> np.ndarray:
     return np.asarray(img, dtype=np.uint8)
 
 
+
+
+def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
+    """Return True when obstacle-avoid routing explicitly failed."""
+    nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
+    if not isinstance(nets, list):
+        return False
+    for net in nets:
+        if not isinstance(net, dict):
+            continue
+        status = str(net.get("route_status") or "").strip().lower()
+        if status == "failed":
+            return True
+    return False
+
+
+
+def _shuffle_has_obstacle_avoid_failure(scene: Dict[str, Any], meta: Dict[str, Any] | None) -> bool:
+    """Check shuffled layout for obstacle-avoid routing failures and constraint violations."""
+    route_mode = str((meta or {}).get("route_mode") or "").strip().lower()
+    if route_mode not in {"avoid_obstacles", "obstacle_avoid", "orthogonal_avoid"}:
+        return False
+
+    nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
+    if not isinstance(nets, list):
+        return False
+
+    for net in nets:
+        if not isinstance(net, dict):
+            continue
+        status = str(net.get("route_status") or "").strip().lower()
+        if status == "failed":
+            return True
+    return False
+
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
     import io
 
@@ -287,12 +341,11 @@ def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
     if image.size != mask.size:
         mask = mask.resize(image.size)
 
-    arr = np.asarray(image, dtype=np.uint8)
-    gray = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(np.uint8)
+    arr = np.asarray(image, dtype=np.uint8).copy()
     mask_arr = np.asarray(mask, dtype=np.uint8) > 0
-    gray[mask_arr] = 0
+    arr[mask_arr] = (255, 255, 255)
     out = io.BytesIO()
-    Image.fromarray(gray, mode="L").save(out, format="PNG")
+    Image.fromarray(arr, mode="RGB").save(out, format="PNG")
     return out.getvalue()
 
 
@@ -497,22 +550,29 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
     rel_dir = _job_rel_dir(job_id or _new_job_id())
     storage.ensure_dir(rel_dir)
     out_items: List[Dict[str, Any]] = []
+    attempt_errors: List[Dict[str, Any]] = []
     succeeded = 0
     failed = 0
+    attempt = 0
+    max_attempts = max(n, int((payload or {}).get("max_attempts") or (n * 20)))
 
-    for i in range(n):
-        seed = seed_start + i
-        source_scene = copy.deepcopy(scenes[i % len(scenes)])
+    while succeeded < n and attempt < max_attempts:
+        seed = seed_start + attempt
+        source_scene = copy.deepcopy(scenes[attempt % len(scenes)])
         try:
             scene_item = source_scene
+            shuffle_meta: Dict[str, Any] | None = None
             if use_shuffle:
-                scene_item, _ = shuffle_scene(
+                scene_item, shuffle_meta = shuffle_scene(
                     scene=source_scene,
                     vocab=footprint_db,
                     params=shuffle_params,
                     seed=seed,
                     return_paths=True,
                 )
+                # Shuffle once per attempt; if routing failed, skip and retry with next seed.
+                if _shuffle_has_obstacle_avoid_failure(scene_item, shuffle_meta):
+                    raise ValueError("route obstacle-avoid failed after shuffle; retry next layout")
 
             image_png = _rasterize_scene_png(scene_item, footprint_db, settings)
             w, h = _scene_resolution(scene_item, settings)
@@ -525,6 +585,10 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
             )
             mask_png = encode_png(mask_np)
             mask_np_decoded = _decode_mask_png(mask_png)
+            if int(np.count_nonzero(mask_np_decoded)) <= 0:
+                raise ValueError("mask generation produced an empty mask")
+            if _scene_has_route_failure(scene_item):
+                raise ValueError("route obstacle-avoid failed; skip this sample")
             label = compute_label(
                 scene=scene_item,
                 mask=mask_np_decoded,
@@ -534,7 +598,7 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
             )
             image_with_mask = _compose_image_with_mask(image_png, mask_png)
 
-            sample_id = f"{save_prefix}{i:06d}"
+            sample_id = f"{save_prefix}{succeeded:06d}"
             saved = save_sample(
                 storage,
                 image_bytes=image_png,
@@ -560,7 +624,8 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
 
             out_items.append(
                 {
-                    "index": i,
+                    "index": succeeded,
+                    "attempt": attempt,
                     "seed": seed,
                     "sample_id": sample_id,
                     "paths": {
@@ -575,19 +640,25 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
             )
             succeeded += 1
         except Exception as e:
-            out_items.append({"index": i, "seed": seed, "ok": False, "error": str(e)})
             failed += 1
+            attempt_errors.append({"attempt": attempt, "seed": seed, "error": str(e)})
+        finally:
+            attempt += 1
 
         if job_id is not None:
-            _job_set(job_id, progress=float(i + 1) / float(max(n, 1)))
+            _job_set(job_id, progress=float(succeeded) / float(max(n, 1)))
 
     result: Dict[str, Any] = {
         "ok": failed == 0,
         "job_type": "batch_dataset",
         "num_items": len(out_items),
+        "target_n": n,
         "succeeded": succeeded,
         "failed": failed,
+        "attempted": attempt,
+        "max_attempts": max_attempts,
         "items": out_items,
+        "errors": attempt_errors,
     }
 
     abs_dir = storage.get_abs_path(rel_dir)
