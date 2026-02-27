@@ -270,7 +270,7 @@ export async function bootstrapApp(): Promise<void> {
   const render = (): void => {
     engine.draw(circuitCtx);
     maskCtx.clearRect(0, 0, resolution.w, resolution.h);
-    maskLayer.drawOverlay(maskCtx, 0.45);
+    maskLayer.drawOverlay(maskCtx, 1);
   };
 
   const applyNodeRenderSettings = (): void => {
@@ -673,8 +673,8 @@ export async function bootstrapApp(): Promise<void> {
       const imagePng = await exportCanvasPNG(circuitCanvas);
       const maskPng = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
       const compositePng = await exportCompositePNG(circuitCanvas, state.maskBlob ?? maskLayer.getMaskImageData(), {
-        maskColor: "#ff0000",
-        maskOpacity: 0.45,
+        maskColor: "#ffffff",
+        maskOpacity: 1,
       });
       const label = state.label ?? {
         counts_all: {},
@@ -1124,11 +1124,11 @@ export async function bootstrapApp(): Promise<void> {
   byId<HTMLButtonElement>("btn-export-composite").addEventListener("click", async () => {
     try {
       const compositePng = await exportCompositePNG(circuitCanvas, state.maskBlob ?? maskLayer.getMaskImageData(), {
-        maskColor: "#ff0000",
-        maskOpacity: 0.45,
+        maskColor: "#ffffff",
+        maskOpacity: 1,
       });
       downloadBlob("image_with_mask.png", compositePng);
-      log("已导出 image_with_mask.png（电路图 + 红色半透明 Mask 覆盖）");
+      log("已导出 image_with_mask.png（电路图 + 白色 Mask 覆盖）");
     } catch (err) {
       logError(err, "导出 image_with_mask.png 失败");
     }
