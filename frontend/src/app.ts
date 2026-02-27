@@ -1019,12 +1019,23 @@ export async function bootstrapApp(): Promise<void> {
 
     const runBatchMvp = async (): Promise<void> => {
       const baseScene = syncScene();
-      const concurrency = 2;
+      const concurrency = 1;
       let nextIndex = 0;
       let succeeded = 0;
       let failed = 0;
       const maxAttempts = Math.max(n, n * 20);
       const savedItems: Array<{ sampleId: string; savedPaths: Record<string, any> }> = [];
+
+      const previewShuffleScene = (sceneItem: Scene, index: number, seed: number): void => {
+        try {
+          engine.loadScene(sceneItem);
+          syncScene();
+          render();
+          log(`预览重排结果：index=${index}, seed=${seed}`);
+        } catch (err) {
+          log(`⚠️ 预览重排结果失败(index=${index}, seed=${seed})：${userFacingError(err, "渲染失败")}`);
+        }
+      };
 
       const worker = async (): Promise<void> => {
         while (true) {
@@ -1040,11 +1051,14 @@ export async function bootstrapApp(): Promise<void> {
             if (useBackendShuffle) {
               const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
               sceneItem = shuffled.scene_shuffled ?? baseScene;
+              previewShuffleScene(sceneItem, index, seed);
               const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
               const degradedNets = Number(shuffled?.meta?.route_stats?.degraded ?? 0);
               if (failedNets > 0 || degradedNets > 0) {
                 throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets}, degraded=${degradedNets})`);
               }
+            } else {
+              previewShuffleScene(sceneItem, index, seed);
             }
             if (sceneHasObstacleAvoidFailure(sceneItem)) {
               throw new Error("route obstacle-avoid failed; skip this sample");
