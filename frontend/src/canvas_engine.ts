@@ -1038,7 +1038,7 @@ export class CanvasEngine {
 
       ctx.lineWidth = (isSel ? 3 : 2) * this.netStrokeScale;
       const routeFailed = String((e as any).route_status ?? "") === "failed";
-      ctx.strokeStyle = routeFailed ? "#ffffff" : "#ff0000";
+      ctx.strokeStyle = routeFailed ? "#00ff00" : "#ff0000";
       ctx.stroke();
 
       if (routeFailed) {
