@@ -944,6 +944,13 @@ export async function bootstrapApp(): Promise<void> {
     const n = Math.max(1, Math.floor(toNum(byId<HTMLInputElement>("batch-n").value, 10)));
     const seedStart = Math.floor(toNum(byId<HTMLInputElement>("batch-seed-start").value, 1));
     const useBackendShuffle = byId<HTMLInputElement>("batch-use-shuffle").checked;
+    const shuffleParams = {
+      placement: byId<HTMLSelectElement>("shuffle-placement").value,
+      route_mode: byId<HTMLSelectElement>("shuffle-route").value,
+      bend_mode: byId<HTMLSelectElement>("shuffle-bend").value,
+      margin: toNum(byId<HTMLInputElement>("shuffle-margin").value, 20),
+      max_tries: toNum(byId<HTMLInputElement>("shuffle-max-tries").value, 2000),
+    };
     const maskStrategy = byId<HTMLSelectElement>("batch-mask-strategy").value;
     const maskParams = {
       ratio: toNum(byId<HTMLInputElement>("batch-mask-ratio").value, 0.35),
@@ -958,6 +965,7 @@ export async function bootstrapApp(): Promise<void> {
       n,
       seed_start: seedStart,
       use_backend_shuffle: useBackendShuffle,
+      shuffle_params: shuffleParams,
       mask_strategy: maskStrategy,
       mask_params: maskParams,
       occ_threshold: occThreshold,
@@ -1081,7 +1089,7 @@ export async function bootstrapApp(): Promise<void> {
             let sceneItem = baseScene;
             if (useBackendShuffle) {
               try {
-                const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
+                const shuffled = await getApi().shuffleScene(baseScene, { ...shuffleParams, seed }, true);
                 sceneItem = shuffled.scene_shuffled ?? baseScene;
                 const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
                 const degradedNets = Number(shuffled?.meta?.route_stats?.degraded ?? 0);
@@ -1152,6 +1160,10 @@ export async function bootstrapApp(): Promise<void> {
     };
 
     try {
+      log(
+        `批处理关键参数：n=${n}, seed_start=${seedStart}, use_backend_shuffle=${useBackendShuffle}, ` +
+          `shuffle_params=${JSON.stringify(shuffleParams)}, mask_strategy=${maskStrategy}, zip=${payload.zip}`,
+      );
       const health = await checkBackendReachable();
       if (!health.ok) {
         log(`⚠️ 后端连通性检查失败：${health.url}（${health.reason ?? "unknown"}）`);
