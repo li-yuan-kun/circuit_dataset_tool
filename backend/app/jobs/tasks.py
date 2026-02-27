@@ -240,7 +240,7 @@ def _build_manifest_record(*, sample_id: str, saved_paths: Dict[str, Any], scene
 
 
 def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> bytes:
-    from PIL import Image  # type: ignore
+    from PIL import Image, ImageDraw  # type: ignore
 
     from ..core_logic.rasterize import render_footprint_on_canvas  # type: ignore
 
@@ -257,6 +257,28 @@ def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> 
         except Exception:
             continue
         canvas[np.asarray(fp, dtype=np.uint8) > 0] = (255, 0, 0)
+
+    # Draw net polylines in red so saved batch images keep visible wiring as colored output.
+    img = Image.fromarray(canvas, mode="RGB")
+    draw = ImageDraw.Draw(img)
+    for net in (scene.get("nets") or []):
+        if not isinstance(net, dict):
+            continue
+        path = net.get("path") or []
+        if not isinstance(path, list) or len(path) < 2:
+            continue
+        pts = []
+        for p in path:
+            if not isinstance(p, dict):
+                continue
+            try:
+                x = float(p.get("x"))
+                y = float(p.get("y"))
+            except Exception:
+                continue
+            pts.append((x, y))
+        if len(pts) >= 2:
+            draw.line(pts, fill=(255, 0, 0), width=3)
 
     import io
 
