@@ -30,11 +30,12 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 function normalizeAndValidateBaseUrl(raw: string): { valid: boolean; normalized: string } {
   const value = raw.trim();
   const withoutTrailingSlash = value.replace(/\/+$/, "");
-  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(withoutTrailingSlash);
-  const validRelative = withoutTrailingSlash === "/api/v1";
+  const normalizedCommonTypo = withoutTrailingSlash.replace(/\/api\/(vi|vl)$/i, "/api/v1");
+  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(normalizedCommonTypo);
+  const validRelative = normalizedCommonTypo === "/api/v1";
   return {
     valid: validAbsolute || validRelative,
-    normalized: withoutTrailingSlash,
+    normalized: normalizedCommonTypo,
   };
 }
 
@@ -964,6 +965,28 @@ export async function bootstrapApp(): Promise<void> {
       zip: byId<HTMLInputElement>("batch-zip").checked,
     };
 
+    const checkBackendReachable = async (): Promise<{ ok: boolean; url: string; reason?: string }> => {
+      const baseUrlEl = byId<HTMLInputElement>("api-base-url");
+      const checked = normalizeAndValidateBaseUrl(baseUrlEl.value || "");
+      const base = checked.valid ? checked.normalized : DEFAULT_API_BASE_URL;
+      const url = `${base}/healthz`;
+      const timeoutMs = 5000;
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const resp = await fetch(url, { signal: controller.signal });
+        if (!resp.ok) return { ok: false, url, reason: `HTTP ${resp.status}` };
+        return { ok: true, url };
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return { ok: false, url, reason: `timeout ${timeoutMs}ms` };
+        }
+        return { ok: false, url, reason: err instanceof Error ? err.message : String(err) };
+      } finally {
+        clearTimeout(t);
+      }
+    };
+
     const renderSceneToImagePng = async (scene: Scene): Promise<Blob> => {
       const canvas = document.createElement("canvas");
       canvas.width = resolution.w;
@@ -1112,6 +1135,13 @@ export async function bootstrapApp(): Promise<void> {
     };
 
     try {
+      const health = await checkBackendReachable();
+      if (!health.ok) {
+        log(`⚠️ 后端连通性检查失败：${health.url}（${health.reason ?? "unknown"}）`);
+        setStatus("后端未连通，已回退到 MVP 批处理...");
+        await runBatchMvp();
+        return;
+      }
       const { job_id } = await getApi().submitJob(payload);
       log(`批处理任务已提交，job_id=${job_id}`);
       setStatus(`任务 ${job_id} 已提交，等待执行...`);
@@ -1141,8 +1171,12 @@ export async function bootstrapApp(): Promise<void> {
       setStatus("任务轮询超时，请稍后用 job_id 手动查询。");
       log("⚠️ 批处理轮询超时，请稍后重试查询任务状态");
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        log("⚠️ Jobs 接口返回 NotFound，自动回退到前端 MVP 批处理流程");
+      const jobsUnavailable =
+        (err instanceof ApiError && [404, 405, 409, 500, 501, 502, 503, 504].includes(Number(err.status))) ||
+        err instanceof TypeError;
+
+      if (jobsUnavailable) {
+        log(`⚠️ Jobs 接口不可用，自动回退到前端 MVP 批处理流程：${userFacingError(err, "Jobs 不可用")}`);
         setStatus("Jobs 接口不可用，已回退到 MVP 批处理...");
         if (payload.zip) {
           log("ℹ️ 当前为 MVP 回退流程：不生成 jobs zip；样本会直接保存到后端 DATASET_ROOT。");
