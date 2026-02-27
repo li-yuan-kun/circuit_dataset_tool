@@ -1045,6 +1045,9 @@ export async function bootstrapApp(): Promise<void> {
             if (sceneHasRouteFailure(sceneItem)) {
               throw new Error("route obstacle-avoid failed; skip this sample");
             }
+            if (sceneHasRouteFailure(sceneItem)) {
+              throw new Error("route obstacle-avoid failed; skip this sample");
+            }
 
             const maskRes = await getApi().generateMask(sceneItem, maskStrategy, { ...maskParams, seed });
             if (!(await maskBlobHasCoverage(maskRes.maskPngBlob))) {
