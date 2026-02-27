@@ -313,17 +313,25 @@ def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
 
 
 
-def _shuffle_meta_has_route_failure(meta: Dict[str, Any] | None) -> bool:
-    """True when shuffle metadata reports at least one failed routed net."""
-    if not isinstance(meta, dict):
+def _shuffle_has_obstacle_avoid_failure(scene: Dict[str, Any], meta: Dict[str, Any] | None) -> bool:
+    """Check shuffled layout for obstacle-avoid routing failures and constraint violations."""
+    route_mode = str((meta or {}).get("route_mode") or "").strip().lower()
+    if route_mode not in {"avoid_obstacles", "obstacle_avoid", "orthogonal_avoid"}:
         return False
-    rs = meta.get("route_stats")
-    if not isinstance(rs, dict):
+
+    nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
+    if not isinstance(nets, list):
         return False
-    try:
-        return int(rs.get("failed") or 0) > 0
-    except Exception:
-        return False
+
+    for net in nets:
+        if not isinstance(net, dict):
+            continue
+        status = str(net.get("route_status") or "").strip().lower()
+        if status == "failed":
+            return True
+        if net.get("route_constraint_satisfied") is False:
+            return True
+    return False
 
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
     import io
@@ -565,7 +573,7 @@ def run_batch_dataset(payload: dict, *, job_id: str | None = None) -> dict:
                     return_paths=True,
                 )
                 # Shuffle once per attempt; if routing failed, skip and retry with next seed.
-                if _shuffle_meta_has_route_failure(shuffle_meta):
+                if _shuffle_has_obstacle_avoid_failure(scene_item, shuffle_meta):
                     raise ValueError("route obstacle-avoid failed after shuffle; retry next layout")
 
             image_png = _rasterize_scene_png(scene_item, footprint_db, settings)

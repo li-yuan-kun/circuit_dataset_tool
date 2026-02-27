@@ -990,9 +990,13 @@ export async function bootstrapApp(): Promise<void> {
       throw lastError;
     };
 
-    const sceneHasRouteFailure = (scene: Scene): boolean => {
+    const sceneHasObstacleAvoidFailure = (scene: Scene): boolean => {
       const nets = Array.isArray(scene?.nets) ? scene.nets : [];
-      return nets.some((net) => String((net as any)?.route_status ?? "").toLowerCase() === "failed");
+      return nets.some((net) => {
+        const status = String((net as any)?.route_status ?? "").toLowerCase();
+        if (status === "failed") return true;
+        return (net as any)?.route_constraint_satisfied === false;
+      });
     };
 
     const maskBlobHasCoverage = async (blob: Blob): Promise<boolean> => {
@@ -1042,10 +1046,7 @@ export async function bootstrapApp(): Promise<void> {
                 throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets})`);
               }
             }
-            if (sceneHasRouteFailure(sceneItem)) {
-              throw new Error("route obstacle-avoid failed; skip this sample");
-            }
-            if (sceneHasRouteFailure(sceneItem)) {
+            if (sceneHasObstacleAvoidFailure(sceneItem)) {
               throw new Error("route obstacle-avoid failed; skip this sample");
             }
 
