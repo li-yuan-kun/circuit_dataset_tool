@@ -283,7 +283,7 @@ def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> 
     import io
 
     out = io.BytesIO()
-    img.save(out, format="PNG")
+    Image.fromarray(canvas, mode="RGB").save(out, format="PNG")
     return out.getvalue()
 
 
