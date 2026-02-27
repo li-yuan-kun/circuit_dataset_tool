@@ -1017,7 +1017,7 @@ export async function bootstrapApp(): Promise<void> {
       const nets = Array.isArray(scene?.nets) ? scene.nets : [];
       return nets.some((net) => {
         const st = String((net as any)?.route_status ?? "").toLowerCase();
-        return st === "failed" || st === "degraded";
+        return st === "failed";
       });
     };
 
@@ -1080,21 +1080,30 @@ export async function bootstrapApp(): Promise<void> {
           const processOne = async (): Promise<void> => {
             let sceneItem = baseScene;
             if (useBackendShuffle) {
+              let shuffled: Awaited<ReturnType<ApiClient["shuffleScene"]>> | null = null;
               try {
-                const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
+                shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
                 sceneItem = shuffled.scene_shuffled ?? baseScene;
-                const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
-                const degradedNets = Number(shuffled?.meta?.route_stats?.degraded ?? 0);
-                if (failedNets > 0 || degradedNets > 0) {
-                  throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets}, degraded=${degradedNets})`);
-                }
               } catch (err) {
                 if (!warnedShuffleFallback) {
                   warnedShuffleFallback = true;
-                  log(`⚠️ 后端 /topology/shuffle 不可用，MVP 已切换本地 shuffle：${userFacingError(err, "shuffle失败")}`);
+                  log(`⚠️ /topology/shuffle 不可用，MVP 已切换本地 shuffle：${userFacingError(err, "shuffle失败")}`);
                 }
                 sceneItem = localShuffleScene(baseScene, seed);
               }
+
+              if (shuffled) {
+                const failedNets = Number(shuffled.meta?.route_stats?.failed ?? 0);
+                const degradedNets = Number(shuffled.meta?.route_stats?.degraded ?? 0);
+                if (failedNets > 0) {
+                  throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets}, degraded=${degradedNets})`);
+                }
+                if (degradedNets > 0) {
+                  log(`⚠️ shuffle 可用但存在 degraded（degraded=${degradedNets}）`);
+                  log(`⚠️ 路由退化（degraded=${degradedNets}）`);
+                }
+              }
+
               previewShuffleScene(sceneItem, index, seed);
             } else {
               sceneItem = localShuffleScene(baseScene, seed);
