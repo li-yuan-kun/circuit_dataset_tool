@@ -299,7 +299,7 @@ def _decode_mask_png(mask_png: bytes) -> np.ndarray:
 
 
 def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
-    """Return True when any net has explicit route failure markers."""
+    """Return True when any net indicates route obstacle-avoid failed/violated."""
     nets = (scene or {}).get("nets") if isinstance(scene, dict) else None
     if not isinstance(nets, list):
         return False
@@ -307,13 +307,10 @@ def _scene_has_route_failure(scene: Dict[str, Any]) -> bool:
         if not isinstance(net, dict):
             continue
         status = str(net.get("route_status") or "").strip().lower()
-        if status == "failed":
+        if status in {"failed", "degraded"}:
             return True
         if net.get("route_constraint_satisfied") is False:
-            mode = str(net.get("route_mode_used") or "").strip().lower()
-            # hard-avoid routes that violate obstacle constraints should be skipped.
-            if mode in {"orthogonal_avoid", "fallback_two_seg", "two_seg"}:
-                return True
+            return True
     return False
 
 def _compose_image_with_mask(image_png: bytes, mask_png: bytes) -> bytes:
