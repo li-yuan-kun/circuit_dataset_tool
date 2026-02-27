@@ -5,11 +5,12 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 function normalizeAndValidateBaseUrl(raw: string): { valid: boolean; normalized: string } {
   const value = raw.trim();
   const withoutTrailingSlash = value.replace(/\/+$/, "");
-  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(withoutTrailingSlash);
-  const validRelative = withoutTrailingSlash === "/api/v1";
+  const normalizedCommonTypo = withoutTrailingSlash.replace(/\/api\/(vi|vl)$/i, "/api/v1");
+  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(normalizedCommonTypo);
+  const validRelative = normalizedCommonTypo === "/api/v1";
   return {
     valid: validAbsolute || validRelative,
-    normalized: withoutTrailingSlash,
+    normalized: normalizedCommonTypo,
   };
 }
 

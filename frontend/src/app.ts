@@ -30,11 +30,12 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 function normalizeAndValidateBaseUrl(raw: string): { valid: boolean; normalized: string } {
   const value = raw.trim();
   const withoutTrailingSlash = value.replace(/\/+$/, "");
-  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(withoutTrailingSlash);
-  const validRelative = withoutTrailingSlash === "/api/v1";
+  const normalizedCommonTypo = withoutTrailingSlash.replace(/\/api\/(vi|vl)$/i, "/api/v1");
+  const validAbsolute = /^https?:\/\/.+\/api\/v1$/i.test(normalizedCommonTypo);
+  const validRelative = normalizedCommonTypo === "/api/v1";
   return {
     valid: validAbsolute || validRelative,
-    normalized: withoutTrailingSlash,
+    normalized: normalizedCommonTypo,
   };
 }
 
@@ -270,19 +271,21 @@ export async function bootstrapApp(): Promise<void> {
   const render = (): void => {
     engine.draw(circuitCtx);
     maskCtx.clearRect(0, 0, resolution.w, resolution.h);
-    maskLayer.drawOverlay(maskCtx, 0.45);
+    maskLayer.drawOverlay(maskCtx, 1);
   };
 
   const applyNodeRenderSettings = (): void => {
     const mode = byId<HTMLSelectElement>("node-render-mode").value as NodeRenderMode;
     const strokeScale = toNum(byId<HTMLInputElement>("node-stroke-scale").value, 1);
+    const netStrokeScale = toNum(byId<HTMLInputElement>("net-stroke-scale").value, 1);
     const showLabel = byId<HTMLInputElement>("node-show-type").checked;
-    engine.setNodeRenderOptions({ mode, strokeScale, showTypeLabelOnSymbol: showLabel });
+    engine.setNodeRenderOptions({ mode, strokeScale, netStrokeScale, showTypeLabelOnSymbol: showLabel });
 
     try {
       localStorage.setItem("cdt.nodeRenderMode", mode);
       localStorage.setItem("cdt.nodeStrokeScale", String(strokeScale));
       localStorage.setItem("cdt.nodeShowType", String(showLabel));
+      localStorage.setItem("cdt.netStrokeScale", String(netStrokeScale));
     } catch {
       // ignore
     }
@@ -293,6 +296,8 @@ export async function bootstrapApp(): Promise<void> {
     const strokeEl = byId<HTMLInputElement>("node-stroke-scale");
     const strokeText = byId<HTMLSpanElement>("node-stroke-scale-text");
     const showTypeEl = byId<HTMLInputElement>("node-show-type");
+    const netStrokeEl = byId<HTMLInputElement>("net-stroke-scale");
+    const netStrokeText = byId<HTMLSpanElement>("net-stroke-scale-text");
 
     try {
       const mode = localStorage.getItem("cdt.nodeRenderMode");
@@ -301,11 +306,14 @@ export async function bootstrapApp(): Promise<void> {
       if (Number.isFinite(stroke)) strokeEl.value = String(Math.max(0.5, Math.min(3, stroke)));
       const showType = localStorage.getItem("cdt.nodeShowType");
       if (showType === "true" || showType === "false") showTypeEl.checked = showType === "true";
+      const netStroke = Number(localStorage.getItem("cdt.netStrokeScale"));
+      if (Number.isFinite(netStroke)) netStrokeEl.value = String(Math.max(0.5, Math.min(4, netStroke)));
     } catch {
       // ignore
     }
 
     strokeText.textContent = Number(strokeEl.value).toFixed(1);
+    netStrokeText.textContent = Number(netStrokeEl.value).toFixed(1);
     applyNodeRenderSettings();
     modeEl.addEventListener("change", () => {
       applyNodeRenderSettings();
@@ -318,6 +326,11 @@ export async function bootstrapApp(): Promise<void> {
       render();
     });
     showTypeEl.addEventListener("change", () => {
+      applyNodeRenderSettings();
+      render();
+    });
+    netStrokeEl.addEventListener("input", () => {
+      netStrokeText.textContent = Number(netStrokeEl.value).toFixed(1);
       applyNodeRenderSettings();
       render();
     });
@@ -661,8 +674,8 @@ export async function bootstrapApp(): Promise<void> {
       const imagePng = await exportCanvasPNG(circuitCanvas);
       const maskPng = state.maskBlob ?? (await maskLayer.exportMaskBinaryPNG());
       const compositePng = await exportCompositePNG(circuitCanvas, state.maskBlob ?? maskLayer.getMaskImageData(), {
-        maskColor: "#ff0000",
-        maskOpacity: 0.45,
+        maskColor: "#ffffff",
+        maskOpacity: 1,
       });
       const label = state.label ?? {
         counts_all: {},
@@ -952,6 +965,28 @@ export async function bootstrapApp(): Promise<void> {
       zip: byId<HTMLInputElement>("batch-zip").checked,
     };
 
+    const checkBackendReachable = async (): Promise<{ ok: boolean; url: string; reason?: string }> => {
+      const baseUrlEl = byId<HTMLInputElement>("api-base-url");
+      const checked = normalizeAndValidateBaseUrl(baseUrlEl.value || "");
+      const base = checked.valid ? checked.normalized : DEFAULT_API_BASE_URL;
+      const url = `${base}/healthz`;
+      const timeoutMs = 5000;
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const resp = await fetch(url, { signal: controller.signal });
+        if (!resp.ok) return { ok: false, url, reason: `HTTP ${resp.status}` };
+        return { ok: true, url };
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return { ok: false, url, reason: `timeout ${timeoutMs}ms` };
+        }
+        return { ok: false, url, reason: err instanceof Error ? err.message : String(err) };
+      } finally {
+        clearTimeout(t);
+      }
+    };
+
     const renderSceneToImagePng = async (scene: Scene): Promise<Blob> => {
       const canvas = document.createElement("canvas");
       canvas.width = resolution.w;
@@ -978,19 +1013,59 @@ export async function bootstrapApp(): Promise<void> {
       throw lastError;
     };
 
+    const sceneHasObstacleAvoidFailure = (scene: Scene): boolean => {
+      const nets = Array.isArray(scene?.nets) ? scene.nets : [];
+      return nets.some((net) => {
+        const st = String((net as any)?.route_status ?? "").toLowerCase();
+        return st === "failed" || st === "degraded";
+      });
+    };
+
+    const maskBlobHasCoverage = async (blob: Blob): Promise<boolean> => {
+      const bmp = await createImageBitmap(blob);
+      try {
+        const c = document.createElement("canvas");
+        c.width = bmp.width;
+        c.height = bmp.height;
+        const ctx = c.getContext("2d");
+        if (!ctx) return false;
+        ctx.drawImage(bmp, 0, 0);
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] > 0 || data[i + 1] > 0 || data[i + 2] > 0) return true;
+        }
+        return false;
+      } finally {
+        bmp.close();
+      }
+    };
+
     const runBatchMvp = async (): Promise<void> => {
       const baseScene = syncScene();
-      const concurrency = 2;
+      const concurrency = 1;
       let nextIndex = 0;
       let succeeded = 0;
       let failed = 0;
+      const maxAttempts = Math.max(n, n * 20);
       const savedItems: Array<{ sampleId: string; savedPaths: Record<string, any> }> = [];
+
+      const previewShuffleScene = (sceneItem: Scene, index: number, seed: number): void => {
+        try {
+          engine.loadScene(sceneItem);
+          syncScene();
+          render();
+          log(`预览重排结果：index=${index}, seed=${seed}`);
+        } catch (err) {
+          log(`⚠️ 预览重排结果失败(index=${index}, seed=${seed})：${userFacingError(err, "渲染失败")}`);
+        }
+      };
 
       const worker = async (): Promise<void> => {
         while (true) {
+          if (succeeded >= n) return;
           const index = nextIndex;
           nextIndex += 1;
-          if (index >= n) return;
+          if (index >= maxAttempts) return;
 
           const seed = seedStart + index;
           const sampleId = `batch_mvp_${seed}_${index}`;
@@ -999,9 +1074,23 @@ export async function bootstrapApp(): Promise<void> {
             if (useBackendShuffle) {
               const shuffled = await getApi().shuffleScene(baseScene, { seed }, true);
               sceneItem = shuffled.scene_shuffled ?? baseScene;
+              previewShuffleScene(sceneItem, index, seed);
+              const failedNets = Number(shuffled?.meta?.route_stats?.failed ?? 0);
+              const degradedNets = Number(shuffled?.meta?.route_stats?.degraded ?? 0);
+              if (failedNets > 0 || degradedNets > 0) {
+                throw new Error(`route obstacle-avoid failed after shuffle (failed=${failedNets}, degraded=${degradedNets})`);
+              }
+            } else {
+              previewShuffleScene(sceneItem, index, seed);
+            }
+            if (sceneHasObstacleAvoidFailure(sceneItem)) {
+              throw new Error("route obstacle-avoid failed; skip this sample");
             }
 
             const maskRes = await getApi().generateMask(sceneItem, maskStrategy, { ...maskParams, seed });
+            if (!(await maskBlobHasCoverage(maskRes.maskPngBlob))) {
+              throw new Error("mask generation produced an empty mask");
+            }
             const labelRes = await getApi().computeLabel(sceneItem, maskRes.maskPngBlob, occThreshold, functionName);
 
             const sceneJson = makeSceneJson(sceneItem);
@@ -1025,14 +1114,19 @@ export async function bootstrapApp(): Promise<void> {
             failed += 1;
             log(`⚠️ MVP 批处理样本失败(index=${index}, seed=${seed})：${userFacingError(error, "处理失败")}`);
           }
-          const progress = Math.round(((succeeded + failed) / Math.max(n, 1)) * 100);
-          setStatus(`MVP串行批处理中 | 进度=${progress}% | 成功=${succeeded} | 失败=${failed}`);
+          const progress = Math.round((succeeded / Math.max(n, 1)) * 100);
+          setStatus(`MVP串行批处理中 | 进度=${progress}% | 成功=${succeeded}/${n} | 尝试失败=${failed}`);
         }
       };
 
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      setStatus(`MVP批处理完成 | 成功=${succeeded} | 失败=${failed}`);
-      log(`MVP 批处理完成：成功=${succeeded}，失败=${failed}`);
+      if (succeeded < n) {
+        setStatus(`MVP批处理结束 | 仅成功=${succeeded}/${n} | 尝试失败=${failed}`);
+        log(`⚠️ MVP 批处理达到最大尝试次数，成功=${succeeded}/${n}，失败=${failed}`);
+      } else {
+        setStatus(`MVP批处理完成 | 成功=${succeeded}/${n} | 尝试失败=${failed}`);
+        log(`MVP 批处理完成：成功=${succeeded}/${n}，失败=${failed}`);
+      }
       if (savedItems.length > 0) {
         const first = savedItems[0];
         log(`MVP 保存位置示例：sample_id=${first.sampleId}，image=${first.savedPaths?.image ?? "(未知)"}`);
@@ -1041,6 +1135,13 @@ export async function bootstrapApp(): Promise<void> {
     };
 
     try {
+      const health = await checkBackendReachable();
+      if (!health.ok) {
+        log(`⚠️ 后端连通性检查失败：${health.url}（${health.reason ?? "unknown"}）`);
+        setStatus("后端未连通，已回退到 MVP 批处理...");
+        await runBatchMvp();
+        return;
+      }
       const { job_id } = await getApi().submitJob(payload);
       log(`批处理任务已提交，job_id=${job_id}`);
       setStatus(`任务 ${job_id} 已提交，等待执行...`);
@@ -1070,8 +1171,12 @@ export async function bootstrapApp(): Promise<void> {
       setStatus("任务轮询超时，请稍后用 job_id 手动查询。");
       log("⚠️ 批处理轮询超时，请稍后重试查询任务状态");
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        log("⚠️ Jobs 接口返回 NotFound，自动回退到前端 MVP 批处理流程");
+      const jobsUnavailable =
+        (err instanceof ApiError && [404, 405, 409, 500, 501, 502, 503, 504].includes(Number(err.status))) ||
+        err instanceof TypeError;
+
+      if (jobsUnavailable) {
+        log(`⚠️ Jobs 接口不可用，自动回退到前端 MVP 批处理流程：${userFacingError(err, "Jobs 不可用")}`);
         setStatus("Jobs 接口不可用，已回退到 MVP 批处理...");
         if (payload.zip) {
           log("ℹ️ 当前为 MVP 回退流程：不生成 jobs zip；样本会直接保存到后端 DATASET_ROOT。");
@@ -1105,11 +1210,11 @@ export async function bootstrapApp(): Promise<void> {
   byId<HTMLButtonElement>("btn-export-composite").addEventListener("click", async () => {
     try {
       const compositePng = await exportCompositePNG(circuitCanvas, state.maskBlob ?? maskLayer.getMaskImageData(), {
-        maskColor: "#ff0000",
-        maskOpacity: 0.45,
+        maskColor: "#ffffff",
+        maskOpacity: 1,
       });
       downloadBlob("image_with_mask.png", compositePng);
-      log("已导出 image_with_mask.png（电路图 + 红色半透明 Mask 覆盖）");
+      log("已导出 image_with_mask.png（电路图 + 白色 Mask 覆盖）");
     } catch (err) {
       logError(err, "导出 image_with_mask.png 失败");
     }
