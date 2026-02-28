@@ -896,29 +896,43 @@ export class CanvasEngine {
   private findOrthogonalGridRoute(net: Net, p0: Point, p0Out: Point, p1: Point, p1Out: Point): Point[] | null {
     const grid = Math.max(8, Math.min(16, 12));
     const inflate = grid;
-    const cols = Math.ceil(this.resolution.w / grid);
-    const rows = Math.ceil(this.resolution.h / grid);
+    const marginCells = 4;
+    const obstacleBoxes: BBox[] = this.scene.nodes
+      .map((n) => this.nodeBBox(n.id))
+      .map((bb) => (bb ? { x0: bb.x0 - inflate, y0: bb.y0 - inflate, x1: bb.x1 + inflate, y1: bb.y1 + inflate } : null))
+      .filter((bb): bb is BBox => !!bb);
+
+    const points = [p0, p1, p0Out, p1Out];
+    const margin = grid * marginCells;
+    const minX = Math.min(0, ...points.map((p) => p.x), ...obstacleBoxes.map((bb) => bb.x0)) - margin;
+    const minY = Math.min(0, ...points.map((p) => p.y), ...obstacleBoxes.map((bb) => bb.y0)) - margin;
+    const maxX = Math.max(this.resolution.w, ...points.map((p) => p.x), ...obstacleBoxes.map((bb) => bb.x1)) + margin;
+    const maxY = Math.max(this.resolution.h, ...points.map((p) => p.y), ...obstacleBoxes.map((bb) => bb.y1)) + margin;
+
+    const spanW = Math.max(grid * 2, maxX - minX);
+    const spanH = Math.max(grid * 2, maxY - minY);
+    const cols = Math.floor(spanW / grid) + 1;
+    const rows = Math.floor(spanH / grid) + 1;
     const blocked = new Uint8Array(cols * rows);
     const idx = (x: number, y: number) => y * cols + x;
     const clampCell = (v: number, max: number) => Math.max(0, Math.min(max - 1, v));
-    const toCell = (p: Point) => ({ x: clampCell(Math.round(p.x / grid), cols), y: clampCell(Math.round(p.y / grid), rows) });
-    const cellCenter = (x: number, y: number): Point => ({ x: x * grid, y: y * grid });
+    const toCell = (p: Point) => ({
+      x: clampCell(Math.round((p.x - minX) / grid), cols),
+      y: clampCell(Math.round((p.y - minY) / grid), rows),
+    });
+    const cellCenter = (x: number, y: number): Point => ({ x: minX + x * grid, y: minY + y * grid });
 
     const markBox = (bb: BBox) => {
-      const x0 = clampCell(Math.floor(bb.x0 / grid), cols);
-      const y0 = clampCell(Math.floor(bb.y0 / grid), rows);
-      const x1 = clampCell(Math.ceil(bb.x1 / grid), cols);
-      const y1 = clampCell(Math.ceil(bb.y1 / grid), rows);
+      const x0 = clampCell(Math.floor((bb.x0 - minX) / grid), cols);
+      const y0 = clampCell(Math.floor((bb.y0 - minY) / grid), rows);
+      const x1 = clampCell(Math.ceil((bb.x1 - minX) / grid), cols);
+      const y1 = clampCell(Math.ceil((bb.y1 - minY) / grid), rows);
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) blocked[idx(x, y)] = 1;
       }
     };
 
-    for (const n of this.scene.nodes) {
-      const bb = this.nodeBBox(n.id);
-      if (!bb) continue;
-      markBox({ x0: bb.x0 - inflate, y0: bb.y0 - inflate, x1: bb.x1 + inflate, y1: bb.y1 + inflate });
-    }
+    for (const bb of obstacleBoxes) markBox(bb);
 
     const clearLead = (a: Point, b: Point): void => {
       const n = Math.max(2, Math.ceil(Math.hypot(a.x - b.x, a.y - b.y) / (grid / 2)));

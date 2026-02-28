@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "scene_version": "0.3",
+    "tool_version": "0.3",
+    "vocab_version": null,
+    "seed": 20260228,
+    "resolution": { "w": 900, "h": 380 },
+    "params": {
+      "route_mode": "two_seg",
+      "bend_mode": "auto"
+    },
+    "timestamp": "2026-02-28T00:00:00.000Z"
+  },
+  "nodes": [
+    {
+      "id": "n_left",
+      "type": "rect_left",
+      "pos": { "x": 130, "y": 190 },
+      "rot": 0,
+      "scale": 1
+    },
+    {
+      "id": "n_blocker",
+      "type": "blocker",
+      "pos": { "x": 450, "y": 190 },
+      "rot": 0,
+      "scale": 4.6
+    },
+    {
+      "id": "n_right",
+      "type": "rect_right",
+      "pos": { "x": 770, "y": 190 },
+      "rot": 0,
+      "scale": 1
+    }
+  ],
+  "nets": [
+    {
+      "id": "e_outer_ring",
+      "from": { "node": "n_left", "pin": "p_right" },
+      "to": { "node": "n_right", "pin": "p_left" },
+      "path": []
+    }
+  ]
+}
