@@ -785,9 +785,11 @@ export class CanvasEngine {
     return false;
   }
 
-  private netObstacles(_net: Net): BBox[] {
+  private netObstacles(net: Net): BBox[] {
     const margin = 2;
+    const endpointNodeIds = new Set([net.from.node, net.to.node]);
     return this.scene.nodes
+      .filter((n) => !endpointNodeIds.has(n.id))
       .map((n) => this.nodeBBox(n.id))
       .map((bb) => (bb ? { x0: bb.x0 - margin, y0: bb.y0 - margin, x1: bb.x1 + margin, y1: bb.y1 + margin } : null))
       .filter((bb): bb is BBox => !!bb);
@@ -915,6 +917,7 @@ export class CanvasEngine {
     };
 
     for (const n of this.scene.nodes) {
+      if (n.id === net.from.node || n.id === net.to.node) continue;
       const bb = this.nodeBBox(n.id);
       if (!bb) continue;
       markBox({ x0: bb.x0 - inflate, y0: bb.y0 - inflate, x1: bb.x1 + inflate, y1: bb.y1 + inflate });
