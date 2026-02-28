@@ -866,15 +866,21 @@ export class CanvasEngine {
       return astar;
     }
 
+    const obstacles = this.netObstacles(net);
+    const endpointBodies = this.endpointBodyObstacles(net);
+
     const midX = (p0Out.x + p1Out.x) / 2;
     const midY = (p0Out.y + p1Out.y) / 2;
     const offsetStep = this.routingFallbackOffsetStep();
-    const offsetLayers = [1, 2, 3, 4].map((k) => k * offsetStep);
+    const offsetLayers = [1, 2, 3, 4, 5, 6].map((k) => k * offsetStep);
     const tryPaths: Point[][] = [
       path,
       [{ ...p0 }, { ...p0Out }, { x: p1Out.x, y: p0Out.y }, { ...p1Out }, { ...p1 }],
       [{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1Out.y }, { ...p1Out }, { ...p1 }],
     ];
+
+    const bodyTop = endpointBodies.length ? Math.min(...endpointBodies.map((bb) => bb.y0)) : Math.min(p0Out.y, p1Out.y);
+    const bodyBottom = endpointBodies.length ? Math.max(...endpointBodies.map((bb) => bb.y1)) : Math.max(p0Out.y, p1Out.y);
 
     for (const offset of offsetLayers) {
       for (const sign of [-1, 1]) {
@@ -901,6 +907,12 @@ export class CanvasEngine {
           { ...p1 },
         ]);
       }
+
+      const detourUpY = bodyTop - offset;
+      const detourDownY = bodyBottom + offset;
+      // 优先尝试整体上绕/下绕，解决“左侧引脚连到右侧器件时穿过自身”
+      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: detourUpY }, { x: p1Out.x, y: detourUpY }, { ...p1Out }, { ...p1 }]);
+      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: detourDownY }, { x: p1Out.x, y: detourDownY }, { ...p1Out }, { ...p1 }]);
     }
 
     for (const rawCandidate of tryPaths) {
@@ -981,10 +993,20 @@ export class CanvasEngine {
       .filter((bb): bb is BBox => !!bb)
       .map((bb) => ({ x0: bb.x0 - inflate, y0: bb.y0 - inflate, x1: bb.x1 + inflate, y1: bb.y1 + inflate }));
 
-    const minX = Math.min(0, ...endpointPts.map((p) => p.x), ...obstacleBoxes.map((bb) => bb.x0)) - routingMargin;
-    const minY = Math.min(0, ...endpointPts.map((p) => p.y), ...obstacleBoxes.map((bb) => bb.y0)) - routingMargin;
-    const maxX = Math.max(this.resolution.w, ...endpointPts.map((p) => p.x), ...obstacleBoxes.map((bb) => bb.x1)) + routingMargin;
-    const maxY = Math.max(this.resolution.h, ...endpointPts.map((p) => p.y), ...obstacleBoxes.map((bb) => bb.y1)) + routingMargin;
+    let minX = Math.min(0, ...endpointPts.map((p) => p.x));
+    let minY = Math.min(0, ...endpointPts.map((p) => p.y));
+    let maxX = Math.max(this.resolution.w, ...endpointPts.map((p) => p.x));
+    let maxY = Math.max(this.resolution.h, ...endpointPts.map((p) => p.y));
+    for (const bb of obstacleBoxes) {
+      if (bb.x0 < minX) minX = bb.x0;
+      if (bb.y0 < minY) minY = bb.y0;
+      if (bb.x1 > maxX) maxX = bb.x1;
+      if (bb.y1 > maxY) maxY = bb.y1;
+    }
+    minX -= routingMargin;
+    minY -= routingMargin;
+    maxX += routingMargin;
+    maxY += routingMargin;
 
     const cols = Math.max(2, Math.ceil((maxX - minX) / grid) + 1);
     const rows = Math.max(2, Math.ceil((maxY - minY) / grid) + 1);
