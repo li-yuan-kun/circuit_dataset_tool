@@ -804,6 +804,14 @@ export class CanvasEngine {
       .filter((bb): bb is BBox => !!bb);
   }
 
+  private netEndpointBoxes(net: Net): BBox[] {
+    const margin = 1;
+    return [net.from.node, net.to.node]
+      .map((nodeId) => this.nodeBBox(nodeId))
+      .map((bb) => (bb ? { x0: bb.x0 - margin, y0: bb.y0 - margin, x1: bb.x1 + margin, y1: bb.y1 + margin } : null))
+      .filter((bb): bb is BBox => !!bb);
+  }
+
   private pathForObstacleCheck(path: Point[], net: Net): Point[] {
     if (!Array.isArray(path) || path.length < 2) return path;
     const leadLen = 12;
@@ -817,6 +825,20 @@ export class CanvasEngine {
     return adjusted;
   }
 
+  private pathInternalForEndpointCheck(path: Point[], net: Net): Point[] {
+    const adjusted = this.pathForObstacleCheck(path, net);
+    if (adjusted.length < 4) return [];
+    return adjusted.slice(1, adjusted.length - 1);
+  }
+
+  private isRouteValidForNet(path: Point[], net: Net): boolean {
+    if (!Array.isArray(path) || path.length < 2) return false;
+    if (this.pathIntersectsBBoxes(this.pathForObstacleCheck(path, net), this.netObstacles(net))) return false;
+    const internal = this.pathInternalForEndpointCheck(path, net);
+    if (internal.length >= 2 && this.pathIntersectsBBoxes(internal, this.netEndpointBoxes(net))) return false;
+    return true;
+  }
+
   private validateBackendPath(net: Net, path: Point[]): { ok: boolean; hitObstacle: boolean } {
     if (!Array.isArray(path) || path.length < 2) return { ok: false, hitObstacle: false };
     const checkedPath = this.pathForObstacleCheck(path, net);
@@ -824,6 +846,10 @@ export class CanvasEngine {
     const endpointBodies = this.endpointBodyObstacles(net);
     const hitObstacle = this.pathIntersectsBBoxes(checkedPath, obstacles) || this.pathIntersectsBBoxes(checkedPath, endpointBodies);
     return { ok: !hitObstacle, hitObstacle };
+  }
+
+  private isRouteValidForNet(net: Net, path: Point[]): boolean {
+    return this.validateBackendPath(net, path).ok;
   }
 
   private reroutePolylineAvoidObstacles(path: Point[], net: Net): Point[] {
@@ -839,8 +865,6 @@ export class CanvasEngine {
       (net as any).route_message = undefined;
       return astar;
     }
-
-    const obstacles = this.netObstacles(net);
 
     const midX = (p0Out.x + p1Out.x) / 2;
     const midY = (p0Out.y + p1Out.y) / 2;
@@ -907,9 +931,12 @@ export class CanvasEngine {
     const hash = this.routingHash(net);
     const cached = this.pathCache.get(net.id);
     if (cached && cached.hash === hash) {
-      (net as any).route_status = cached.failed ? "failed" : "ok";
-      (net as any).route_message = cached.failed ? "避障失败" : undefined;
-      return cached.path.map((p) => ({ ...p }));
+      const cachedPath = cached.path.map((p) => ({ ...p }));
+      const cachedValid = this.isRouteValidForNet(net, cachedPath);
+      const cachedFailed = cached.failed || !cachedValid;
+      (net as any).route_status = cachedFailed ? "failed" : "ok";
+      (net as any).route_message = cachedFailed ? "避障失败" : undefined;
+      return cachedPath;
     }
 
     const p0 = this.endpointXY(net.from);
@@ -921,13 +948,16 @@ export class CanvasEngine {
     const hv = [{ ...p0 }, { ...p0Out }, { x: p1Out.x, y: p0Out.y }, { ...p1Out }, { ...p1 }];
     const vh = [{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1Out.y }, { ...p1Out }, { ...p1 }];
 
-    const obstacles = this.netObstacles(net);
-
-    const hvPenalty = this.pathIntersectsBBoxes(this.pathForObstacleCheck(hv, net), obstacles) ? 1 : 0;
-    const vhPenalty = this.pathIntersectsBBoxes(this.pathForObstacleCheck(vh, net), obstacles) ? 1 : 0;
+    const hvPenalty = this.isRouteValidForNet(hv, net) ? 0 : 1;
+    const vhPenalty = this.isRouteValidForNet(vh, net) ? 0 : 1;
     const base = hvPenalty <= vhPenalty ? hv : vh;
     const routed = this.reroutePolylineAvoidObstacles(base, net);
-    const failed = String((net as any).route_status ?? "") === "failed";
+    const routedValid = this.isRouteValidForNet(net, routed);
+    const failed = String((net as any).route_status ?? "") === "failed" || !routedValid;
+    if (!routedValid && String((net as any).route_status ?? "") !== "failed") {
+      (net as any).route_status = "degraded";
+      (net as any).route_message = "避障路径校验未通过";
+    }
     this.pathCache.set(net.id, { hash, path: routed.map((p) => ({ ...p })), failed });
     return routed;
   }
@@ -1094,11 +1124,11 @@ export class CanvasEngine {
     for (const e of this.scene.nets) {
       const isSel = this.sel?.netId === e.id;
       let path = (e.path && e.path.length >= 2) ? e.path : this.computeDefaultNetPath(e);
-      const backendCheck = this.validateBackendPath(e, path);
-      if (!backendCheck.ok) {
+      const routeValid = this.isRouteValidForNet(e, path);
+      if (!routeValid) {
         const fallback = this.reroutePolylineAvoidObstacles(this.computeDefaultNetPath(e), e);
-        const repaired = this.validateBackendPath(e, fallback);
-        if (repaired.ok) {
+        const repaired = this.isRouteValidForNet(e, fallback);
+        if (repaired) {
           path = fallback;
           e.path = fallback;
           (e as any).route_status = "degraded";
