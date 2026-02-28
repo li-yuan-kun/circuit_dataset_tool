@@ -683,6 +683,31 @@ export class CanvasEngine {
     return null;
   }
 
+  hitTestNet(p: Point): string | null {
+    const distancePointToSegment = (pt: Point, a: Point, b: Point): number => {
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const apx = pt.x - a.x;
+      const apy = pt.y - a.y;
+      const len2 = abx * abx + aby * aby;
+      if (len2 < 1e-6) return Math.hypot(apx, apy);
+      const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / len2));
+      const qx = a.x + abx * t;
+      const qy = a.y + aby * t;
+      return Math.hypot(pt.x - qx, pt.y - qy);
+    };
+
+    const threshold = Math.max(5, 8 * this.netStrokeScale);
+    for (let i = this.scene.nets.length - 1; i >= 0; i--) {
+      const net = this.scene.nets[i];
+      const path = (net.path && net.path.length >= 2) ? net.path : this.computeDefaultNetPath(net);
+      for (let j = 0; j < path.length - 1; j++) {
+        if (distancePointToSegment(p, path[j], path[j + 1]) <= threshold) return net.id;
+      }
+    }
+    return null;
+  }
+
   private endpointXY(ep: Endpoint): Point {
     const n = this.scene.nodes.find((x) => x.id === ep.node);
     if (!n) return { x: 0, y: 0 };

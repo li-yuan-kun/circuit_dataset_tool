@@ -1406,6 +1406,33 @@ function bindCircuitInteractions(opts: {
     drawUi();
   };
 
+  const deleteSelected = () => {
+    const sel = engine.getSelection();
+    if (sel?.nodeId) {
+      engine.removeNode(sel.nodeId);
+      onChange();
+      redrawAll();
+      log(`已删除器件：${sel.nodeId}`);
+      return;
+    }
+    if (sel?.netId) {
+      engine.removeNet(sel.netId);
+      onChange();
+      redrawAll();
+      log(`已删除连线：${sel.netId}`);
+      return;
+    }
+    log("未选中可删除的器件或连线");
+  };
+
+  const deleteBtn = maybeById<HTMLButtonElement>("btn-delete-selection");
+  if (deleteBtn) {
+    deleteBtn.addEventListener("click", () => {
+      if (!canEdit()) return;
+      deleteSelected();
+    });
+  }
+
   uiCanvas.addEventListener("mousedown", (ev) => {
     if (!canEdit()) return;
     const p = point(ev);
@@ -1418,18 +1445,25 @@ function bindCircuitInteractions(opts: {
     }
 
     const hitNodeId = engine.hitTestNode(p);
-    if (!hitNodeId) {
-      engine.setSelection(null);
+    if (hitNodeId) {
+      const node = engine.getNodeById(hitNodeId);
+      engine.setSelection({ nodeId: hitNodeId });
+      if (node) {
+        draggingNodeId = hitNodeId;
+        dragOffset = { x: p.x - node.pos.x, y: p.y - node.pos.y };
+      }
       redrawAll();
       return;
     }
 
-    const node = engine.getNodeById(hitNodeId);
-    engine.setSelection({ nodeId: hitNodeId });
-    if (node) {
-      draggingNodeId = hitNodeId;
-      dragOffset = { x: p.x - node.pos.x, y: p.y - node.pos.y };
+    const hitNetId = engine.hitTestNet(p);
+    if (hitNetId) {
+      engine.setSelection({ netId: hitNetId });
+      redrawAll();
+      return;
     }
+
+    engine.setSelection(null);
     redrawAll();
   });
 
@@ -1474,18 +1508,8 @@ function bindCircuitInteractions(opts: {
   window.addEventListener("keydown", (ev) => {
     if (!canEdit()) return;
     if (ev.key !== "Delete" && ev.key !== "Backspace") return;
-    const sel = engine.getSelection();
-    if (sel?.nodeId) {
-      engine.removeNode(sel.nodeId);
-      onChange();
-      redrawAll();
-      log(`已删除器件：${sel.nodeId}`);
-    } else if (sel?.netId) {
-      engine.removeNet(sel.netId);
-      onChange();
-      redrawAll();
-      log(`已删除连线：${sel.netId}`);
-    }
+    ev.preventDefault();
+    deleteSelected();
   });
 
   uiCanvas.addEventListener(
