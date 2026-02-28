@@ -785,6 +785,15 @@ export class CanvasEngine {
     return false;
   }
 
+  private endpointBodyObstacles(net: Net): BBox[] {
+    const bodyMargin = 1;
+    const ids = [net.from.node, net.to.node];
+    return ids
+      .map((id) => this.nodeBBox(id))
+      .map((bb) => (bb ? { x0: bb.x0 + bodyMargin, y0: bb.y0 + bodyMargin, x1: bb.x1 - bodyMargin, y1: bb.y1 - bodyMargin } : null))
+      .filter((bb): bb is BBox => !!bb && bb.x0 < bb.x1 && bb.y0 < bb.y1);
+  }
+
   private netObstacles(net: Net): BBox[] {
     const margin = 2;
     const endpointNodeIds = new Set([net.from.node, net.to.node]);
@@ -810,8 +819,10 @@ export class CanvasEngine {
 
   private validateBackendPath(net: Net, path: Point[]): { ok: boolean; hitObstacle: boolean } {
     if (!Array.isArray(path) || path.length < 2) return { ok: false, hitObstacle: false };
+    const checkedPath = this.pathForObstacleCheck(path, net);
     const obstacles = this.netObstacles(net);
-    const hitObstacle = this.pathIntersectsBBoxes(this.pathForObstacleCheck(path, net), obstacles);
+    const endpointBodies = this.endpointBodyObstacles(net);
+    const hitObstacle = this.pathIntersectsBBoxes(checkedPath, obstacles) || this.pathIntersectsBBoxes(checkedPath, endpointBodies);
     return { ok: !hitObstacle, hitObstacle };
   }
 
@@ -823,7 +834,7 @@ export class CanvasEngine {
     const p1Out = this.endpointOutPoint(net.to, p1, leadLen);
 
     const astar = this.findOrthogonalGridRoute(net, p0, p0Out, p1, p1Out);
-    if (astar) {
+    if (astar && this.validateBackendPath(net, astar).ok) {
       (net as any).route_status = "ok";
       (net as any).route_message = undefined;
       return astar;
@@ -870,7 +881,7 @@ export class CanvasEngine {
 
     for (const rawCandidate of tryPaths) {
       const candidate = this.simplifyOrthogonalPath(rawCandidate);
-      if (!this.pathIntersectsBBoxes(this.pathForObstacleCheck(candidate, net), obstacles)) {
+      if (!this.pathIntersectsBBoxes(this.pathForObstacleCheck(candidate, net), obstacles) && this.validateBackendPath(net, candidate).ok) {
         (net as any).route_status = "ok";
         (net as any).route_message = undefined;
         return candidate;
@@ -932,30 +943,39 @@ export class CanvasEngine {
   private findOrthogonalGridRoute(net: Net, p0: Point, p0Out: Point, p1: Point, p1Out: Point): Point[] | null {
     const grid = this.routingGridSize();
     const inflate = grid;
-    const cols = Math.ceil(this.resolution.w / grid);
-    const rows = Math.ceil(this.resolution.h / grid);
+    const routingMargin = Math.max(grid * 8, this.routingFallbackOffsetStep() * 4);
+    const endpointPts = [p0, p0Out, p1, p1Out];
+    const obstacleBoxes = this.scene.nodes
+      .filter((n) => n.id !== net.from.node && n.id !== net.to.node)
+      .map((n) => this.nodeBBox(n.id))
+      .filter((bb): bb is BBox => !!bb)
+      .map((bb) => ({ x0: bb.x0 - inflate, y0: bb.y0 - inflate, x1: bb.x1 + inflate, y1: bb.y1 + inflate }));
+
+    const minX = Math.min(0, ...endpointPts.map((p) => p.x), ...obstacleBoxes.map((bb) => bb.x0)) - routingMargin;
+    const minY = Math.min(0, ...endpointPts.map((p) => p.y), ...obstacleBoxes.map((bb) => bb.y0)) - routingMargin;
+    const maxX = Math.max(this.resolution.w, ...endpointPts.map((p) => p.x), ...obstacleBoxes.map((bb) => bb.x1)) + routingMargin;
+    const maxY = Math.max(this.resolution.h, ...endpointPts.map((p) => p.y), ...obstacleBoxes.map((bb) => bb.y1)) + routingMargin;
+
+    const cols = Math.max(2, Math.ceil((maxX - minX) / grid) + 1);
+    const rows = Math.max(2, Math.ceil((maxY - minY) / grid) + 1);
+    if (cols * rows > 500_000) return null;
     const blocked = new Uint8Array(cols * rows);
     const idx = (x: number, y: number) => y * cols + x;
     const clampCell = (v: number, max: number) => Math.max(0, Math.min(max - 1, v));
-    const toCell = (p: Point) => ({ x: clampCell(Math.round(p.x / grid), cols), y: clampCell(Math.round(p.y / grid), rows) });
-    const cellCenter = (x: number, y: number): Point => ({ x: x * grid, y: y * grid });
+    const toCell = (p: Point) => ({ x: clampCell(Math.round((p.x - minX) / grid), cols), y: clampCell(Math.round((p.y - minY) / grid), rows) });
+    const cellCenter = (x: number, y: number): Point => ({ x: minX + x * grid, y: minY + y * grid });
 
     const markBox = (bb: BBox) => {
-      const x0 = clampCell(Math.floor(bb.x0 / grid), cols);
-      const y0 = clampCell(Math.floor(bb.y0 / grid), rows);
-      const x1 = clampCell(Math.ceil(bb.x1 / grid), cols);
-      const y1 = clampCell(Math.ceil(bb.y1 / grid), rows);
+      const x0 = clampCell(Math.floor((bb.x0 - minX) / grid), cols);
+      const y0 = clampCell(Math.floor((bb.y0 - minY) / grid), rows);
+      const x1 = clampCell(Math.ceil((bb.x1 - minX) / grid), cols);
+      const y1 = clampCell(Math.ceil((bb.y1 - minY) / grid), rows);
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) blocked[idx(x, y)] = 1;
       }
     };
 
-    for (const n of this.scene.nodes) {
-      if (n.id === net.from.node || n.id === net.to.node) continue;
-      const bb = this.nodeBBox(n.id);
-      if (!bb) continue;
-      markBox({ x0: bb.x0 - inflate, y0: bb.y0 - inflate, x1: bb.x1 + inflate, y1: bb.y1 + inflate });
-    }
+    for (const bb of obstacleBoxes) markBox(bb);
 
     const clearLead = (a: Point, b: Point): void => {
       const n = Math.max(2, Math.ceil(Math.hypot(a.x - b.x, a.y - b.y) / (grid / 2)));
@@ -1035,8 +1055,7 @@ export class CanvasEngine {
     }
 
     const merged = this.simplifyOrthogonalPath([p0, p0Out, ...mids, p1Out, p1]);
-    const obstacles = this.netObstacles(net);
-    if (this.pathIntersectsBBoxes(this.pathForObstacleCheck(merged, net), obstacles)) return null;
+    if (!this.validateBackendPath(net, merged).ok) return null;
     return merged;
   }
 
