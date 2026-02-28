@@ -831,22 +831,45 @@ export class CanvasEngine {
 
     const obstacles = this.netObstacles(net);
 
-    const tryPaths: Point[][] = [path];
-    if (path.length >= 5) {
-      const p0 = path[0];
-      const p0Out = path[1];
-      const p1In = path[path.length - 2];
-      const p1 = path[path.length - 1];
-      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1In.y }, { ...p1In }, { ...p1 }]);
+    const midX = (p0Out.x + p1Out.x) / 2;
+    const midY = (p0Out.y + p1Out.y) / 2;
+    const offsetStep = this.routingFallbackOffsetStep();
+    const offsetLayers = [1, 2, 3, 4].map((k) => k * offsetStep);
+    const tryPaths: Point[][] = [
+      path,
+      [{ ...p0 }, { ...p0Out }, { x: p1Out.x, y: p0Out.y }, { ...p1Out }, { ...p1 }],
+      [{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1Out.y }, { ...p1Out }, { ...p1 }],
+    ];
 
-      const axisOffset = 22;
-      const midX = (p0Out.x + p1In.x) / 2;
-      const midY = (p0Out.y + p1In.y) / 2;
-      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: midX + axisOffset, y: p0Out.y }, { x: midX + axisOffset, y: p1In.y }, { ...p1In }, { ...p1 }]);
-      tryPaths.push([{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: midY - axisOffset }, { x: p1In.x, y: midY - axisOffset }, { ...p1In }, { ...p1 }]);
+    for (const offset of offsetLayers) {
+      for (const sign of [-1, 1]) {
+        const laneX = midX + sign * offset;
+        const laneY = midY + sign * offset;
+        const sideX0 = p0Out.x + sign * offset;
+        const sideY0 = p0Out.y + sign * offset;
+        const sideY1 = p1Out.y + sign * offset;
+
+        // 先横后纵
+        tryPaths.push([{ ...p0 }, { ...p0Out }, { x: laneX, y: p0Out.y }, { x: laneX, y: p1Out.y }, { ...p1Out }, { ...p1 }]);
+        // 先纵后横
+        tryPaths.push([{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: laneY }, { x: p1Out.x, y: laneY }, { ...p1Out }, { ...p1 }]);
+        // 双折线（靠近起点侧）
+        tryPaths.push([{ ...p0 }, { ...p0Out }, { x: sideX0, y: p0Out.y }, { x: sideX0, y: p1Out.y }, { ...p1Out }, { ...p1 }]);
+        // 三折线（先纵向绕开再横向穿越）
+        tryPaths.push([
+          { ...p0 },
+          { ...p0Out },
+          { x: p0Out.x, y: sideY0 },
+          { x: p1Out.x, y: sideY0 },
+          { x: p1Out.x, y: sideY1 },
+          { ...p1Out },
+          { ...p1 },
+        ]);
+      }
     }
 
-    for (const candidate of tryPaths) {
+    for (const rawCandidate of tryPaths) {
+      const candidate = this.simplifyOrthogonalPath(rawCandidate);
       if (!this.pathIntersectsBBoxes(this.pathForObstacleCheck(candidate, net), obstacles)) {
         (net as any).route_status = "ok";
         (net as any).route_message = undefined;
@@ -856,6 +879,17 @@ export class CanvasEngine {
     (net as any).route_status = "failed";
     (net as any).route_message = "避障失败";
     return path;
+  }
+
+  private routingGridSize(): number {
+    const netWidth = Math.max(1, 2 * this.netStrokeScale);
+    return Math.max(8, Math.min(16, Math.round(10 + netWidth)));
+  }
+
+  private routingFallbackOffsetStep(): number {
+    const grid = this.routingGridSize();
+    const netWidth = Math.max(1, 2 * this.netStrokeScale);
+    return Math.max(grid, Math.round(grid + netWidth * 2));
   }
 
   private computeDefaultNetPath(net: Net): Point[] {
@@ -896,7 +930,7 @@ export class CanvasEngine {
   }
 
   private findOrthogonalGridRoute(net: Net, p0: Point, p0Out: Point, p1: Point, p1Out: Point): Point[] | null {
-    const grid = Math.max(8, Math.min(16, 12));
+    const grid = this.routingGridSize();
     const inflate = grid;
     const cols = Math.ceil(this.resolution.w / grid);
     const rows = Math.ceil(this.resolution.h / grid);
