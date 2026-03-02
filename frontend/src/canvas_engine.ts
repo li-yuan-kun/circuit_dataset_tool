@@ -305,7 +305,7 @@ function drawIoPortSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): 
   const r = Math.max(6, Math.min(w, h) * 0.18);
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.fill();
 }
 
 function drawComponentSymbol(ctx: CanvasRenderingContext2D, type: string, w: number, h: number): boolean {
