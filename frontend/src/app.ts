@@ -1384,6 +1384,10 @@ function bindCircuitInteractions(opts: {
   let dragOffset = { x: 0, y: 0 };
   let wiringFrom: { node: string; pin: string } | null = null;
   let hoverPoint: { x: number; y: number } | null = null;
+  let isBoxSelecting = false;
+  let boxStart: { x: number; y: number } | null = null;
+  let boxCurrent: { x: number; y: number } | null = null;
+  const boxThresholdPx = 6;
 
   const point = (ev: MouseEvent) => {
     const rect = uiCanvas.getBoundingClientRect();
@@ -1396,18 +1400,34 @@ function bindCircuitInteractions(opts: {
   const drawUi = () => {
     if (!uiCtx) return;
     uiCtx.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
-    if (!wiringFrom) return;
-    const fromXY = engine.endpointPosition(wiringFrom);
-    const to = hoverPoint ?? fromXY;
-    uiCtx.save();
-    uiCtx.strokeStyle = "#1e88e5";
-    uiCtx.lineWidth = 2;
-    uiCtx.setLineDash([6, 4]);
-    uiCtx.beginPath();
-    uiCtx.moveTo(fromXY.x, fromXY.y);
-    uiCtx.lineTo(to.x, to.y);
-    uiCtx.stroke();
-    uiCtx.restore();
+    if (wiringFrom) {
+      const fromXY = engine.endpointPosition(wiringFrom);
+      const to = hoverPoint ?? fromXY;
+      uiCtx.save();
+      uiCtx.strokeStyle = "#1e88e5";
+      uiCtx.lineWidth = 2;
+      uiCtx.setLineDash([6, 4]);
+      uiCtx.beginPath();
+      uiCtx.moveTo(fromXY.x, fromXY.y);
+      uiCtx.lineTo(to.x, to.y);
+      uiCtx.stroke();
+      uiCtx.restore();
+    }
+
+    if (isBoxSelecting && boxStart && boxCurrent) {
+      const minX = Math.min(boxStart.x, boxCurrent.x);
+      const maxX = Math.max(boxStart.x, boxCurrent.x);
+      const minY = Math.min(boxStart.y, boxCurrent.y);
+      const maxY = Math.max(boxStart.y, boxCurrent.y);
+      uiCtx.save();
+      uiCtx.fillStyle = "rgba(30, 136, 229, 0.15)";
+      uiCtx.strokeStyle = "rgba(30, 136, 229, 0.9)";
+      uiCtx.lineWidth = 1;
+      uiCtx.setLineDash([]);
+      uiCtx.fillRect(minX, minY, maxX - minX, maxY - minY);
+      uiCtx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+      uiCtx.restore();
+    }
   };
 
   const redrawAll = () => {
@@ -1415,16 +1435,35 @@ function bindCircuitInteractions(opts: {
     drawUi();
   };
 
+
+  const clearBoxSelectionState = () => {
+    isBoxSelecting = false;
+    boxStart = null;
+    boxCurrent = null;
+  };
+
+  const rectIntersects = (
+    a: { minX: number; maxX: number; minY: number; maxY: number },
+    b: { x0: number; x1: number; y0: number; y1: number },
+  ): boolean => {
+    return !(a.maxX < b.x0 || a.minX > b.x1 || a.maxY < b.y0 || a.minY > b.y1);
+  };
+
   const deleteSelected = () => {
     const sel = engine.getSelection();
-    const netIds = [...sel.selectedNetIds];
-    const nodeIds = [...sel.selectedNodeIds];
-    for (const netId of netIds) engine.removeNet(netId);
-    for (const nodeId of nodeIds) engine.removeNode(nodeId);
-    if (nodeIds.length || netIds.length) {
+    const selectedNodeIds = sel?.selectedNodeIds ?? (sel?.nodeId ? [sel.nodeId] : []);
+    if (selectedNodeIds.length) {
+      for (const nodeId of selectedNodeIds) engine.removeNode(nodeId);
       onChange();
       redrawAll();
-      log(`已删除 ${nodeIds.length} 个器件 / ${netIds.length} 条连线`);
+      log(`已删除器件：${selectedNodeIds.join(", ")}`);
+      return;
+    }
+    if (sel?.netId) {
+      engine.removeNet(sel.netId);
+      onChange();
+      redrawAll();
+      log(`已删除连线：${sel.netId}`);
       return;
     }
     log("未选中可删除的器件或连线");
@@ -1440,6 +1479,7 @@ function bindCircuitInteractions(opts: {
 
   uiCanvas.addEventListener("mousedown", (ev) => {
     if (!canEdit()) return;
+    if (ev.button !== 0) return;
     const p = point(ev);
     const hitPin = engine.hitTestPin(p);
     if (hitPin) {
@@ -1468,7 +1508,9 @@ function bindCircuitInteractions(opts: {
       return;
     }
 
-    engine.setSelection(null);
+    boxStart = p;
+    boxCurrent = p;
+    isBoxSelecting = false;
     redrawAll();
   });
 
@@ -1479,6 +1521,14 @@ function bindCircuitInteractions(opts: {
     if (draggingNodeId) {
       engine.moveNode(draggingNodeId, { x: p.x - dragOffset.x, y: p.y - dragOffset.y });
       onChange();
+    }
+    if (boxStart) {
+      boxCurrent = p;
+      if (!isBoxSelecting) {
+        const dx = p.x - boxStart.x;
+        const dy = p.y - boxStart.y;
+        isBoxSelecting = Math.hypot(dx, dy) >= boxThresholdPx;
+      }
     }
     render();
     drawUi();
@@ -1494,24 +1544,61 @@ function bindCircuitInteractions(opts: {
       return;
     }
 
-    if (!wiringFrom) return;
-    const targetPin = engine.hitTestPin(p);
-    if (targetPin && !(targetPin.node === wiringFrom.node && targetPin.pin === wiringFrom.pin)) {
-      try {
-        const { replacedOld } = engine.connectPins(wiringFrom, targetPin);
-        onChange();
-        const replaceHint = replacedOld ? "（已替换旧连线）" : "";
-        log(`已连线：${wiringFrom.node}.${wiringFrom.pin} -> ${targetPin.node}.${targetPin.pin}${replaceHint}`);
-      } catch {
-        // ignore
+    if (wiringFrom) {
+      const targetPin = engine.hitTestPin(p);
+      if (targetPin && !(targetPin.node === wiringFrom.node && targetPin.pin === wiringFrom.pin)) {
+        try {
+          const { replacedOld } = engine.connectPins(wiringFrom, targetPin);
+          onChange();
+          const replaceHint = replacedOld ? "（已替换旧连线）" : "";
+          log(`已连线：${wiringFrom.node}.${wiringFrom.pin} -> ${targetPin.node}.${targetPin.pin}${replaceHint}`);
+        } catch {
+          // ignore
+        }
       }
+      wiringFrom = null;
+      redrawAll();
+      return;
     }
-    wiringFrom = null;
-    redrawAll();
+
+    if (boxStart) {
+      boxCurrent = p;
+      if (isBoxSelecting && boxCurrent) {
+        const rect = {
+          minX: Math.min(boxStart.x, boxCurrent.x),
+          maxX: Math.max(boxStart.x, boxCurrent.x),
+          minY: Math.min(boxStart.y, boxCurrent.y),
+          maxY: Math.max(boxStart.y, boxCurrent.y),
+        };
+        const nextSelectedNodeIds = engine
+          .getNodes()
+          .filter((node) => {
+            const bb = engine.getNodeBoundingBox(node.id);
+            return bb ? rectIntersects(rect, bb) : false;
+          })
+          .map((node) => node.id);
+        const prevSelectedNodeIds = engine.getSelection()?.selectedNodeIds ?? [];
+        const merged = ev.shiftKey
+          ? Array.from(new Set([...prevSelectedNodeIds, ...nextSelectedNodeIds]))
+          : nextSelectedNodeIds;
+        engine.setSelection(merged.length ? { nodeId: merged[0], selectedNodeIds: merged } : null);
+      } else {
+        engine.setSelection(null);
+      }
+      clearBoxSelectionState();
+      redrawAll();
+    }
   });
 
   window.addEventListener("keydown", (ev) => {
     if (!canEdit()) return;
+    if (ev.key === "Escape") {
+      if (boxStart || isBoxSelecting) {
+        clearBoxSelectionState();
+        redrawAll();
+      }
+      return;
+    }
     if (ev.key !== "Delete" && ev.key !== "Backspace") return;
     ev.preventDefault();
     deleteSelected();

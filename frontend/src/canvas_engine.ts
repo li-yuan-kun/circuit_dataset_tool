@@ -380,7 +380,7 @@ export class CanvasEngine {
   private readonly vocab: any;
 
   private scene: Scene;
-  private sel: { selectedNodeIds: string[]; selectedNetIds: string[] } = { selectedNodeIds: [], selectedNetIds: [] };
+  private sel: { nodeId?: string; netId?: string; selectedNodeIds?: string[] } | null = null;
 
   private nodeSeq = 1;
   private netSeq = 1;
@@ -489,10 +489,15 @@ export class CanvasEngine {
   removeNode(nodeId: string): void {
     this.scene.nodes = this.scene.nodes.filter((n) => n.id !== nodeId);
     this.scene.nets = this.scene.nets.filter((e) => e.from.node !== nodeId && e.to.node !== nodeId);
-    this.sel.selectedNodeIds = this.sel.selectedNodeIds.filter((id) => id !== nodeId);
-    this.sel.selectedNetIds = this.sel.selectedNetIds.filter((netId) =>
-      this.scene.nets.some((net) => net.id === netId)
-    );
+    if (this.sel?.nodeId === nodeId) this.sel = null;
+    if (this.sel?.selectedNodeIds?.includes(nodeId)) {
+      const next = this.sel.selectedNodeIds.filter((id) => id !== nodeId);
+      if (!next.length && !this.sel.netId) {
+        this.sel = null;
+      } else {
+        this.sel = { ...this.sel, nodeId: next[0], selectedNodeIds: next };
+      }
+    }
   }
 
   moveNode(nodeId: string, pos: Point): void {
@@ -574,44 +579,36 @@ export class CanvasEngine {
     this.sel.selectedNetIds = this.sel.selectedNetIds.filter((id) => id !== netId);
   }
 
-  setSelection(
-    sel:
-      | {
-          nodeId?: string;
-          netId?: string;
-          selectedNodeIds?: string[];
-          selectedNetIds?: string[];
-        }
-      | null
-  ): void {
+  setSelection(sel: { nodeId?: string; netId?: string; selectedNodeIds?: string[] } | null): void {
     if (!sel) {
-      this.sel = { selectedNodeIds: [], selectedNetIds: [] };
+      this.sel = null;
       return;
     }
-    const nodeIds = Array.isArray(sel.selectedNodeIds)
-      ? sel.selectedNodeIds
-      : sel.nodeId
-      ? [sel.nodeId]
+    const selectedNodeIds = Array.isArray(sel.selectedNodeIds)
+      ? Array.from(new Set(sel.selectedNodeIds.filter(Boolean)))
       : [];
-    const netIds = Array.isArray(sel.selectedNetIds)
-      ? sel.selectedNetIds
-      : sel.netId
-      ? [sel.netId]
-      : [];
+    const nodeId = sel.nodeId || selectedNodeIds[0];
+    if (nodeId && !selectedNodeIds.includes(nodeId)) selectedNodeIds.unshift(nodeId);
     this.sel = {
-      selectedNodeIds: [...new Set(nodeIds)],
-      selectedNetIds: [...new Set(netIds)],
+      ...sel,
+      nodeId,
+      selectedNodeIds,
     };
   }
   getNodeById(nodeId: string): Node | null {
     return this.scene.nodes.find((x) => x.id === nodeId) ?? null;
   }
 
-  getSelection(): { selectedNodeIds: string[]; selectedNetIds: string[] } {
-    return {
-      selectedNodeIds: [...this.sel.selectedNodeIds],
-      selectedNetIds: [...this.sel.selectedNetIds],
-    };
+  getSelection(): { nodeId?: string; netId?: string; selectedNodeIds?: string[] } | null {
+    return this.sel ? { ...this.sel, selectedNodeIds: [...(this.sel.selectedNodeIds ?? [])] } : null;
+  }
+
+  getNodes(): Node[] {
+    return this.scene.nodes.map((node) => ({ ...node, pos: { ...node.pos } }));
+  }
+
+  getNodeBoundingBox(nodeId: string): BBox | null {
+    return this.nodeBBox(nodeId);
   }
 
   endpointPosition(ep: Endpoint): Point {
@@ -1229,7 +1226,7 @@ export class CanvasEngine {
       const bw = w * s;
       const bh = h * s;
 
-      const isSel = this.sel.selectedNodeIds.includes(n.id);
+      const isSel = this.sel?.nodeId === n.id || this.sel?.selectedNodeIds?.includes(n.id) === true;
 
       ctx.save();
       ctx.translate(n.pos.x, n.pos.y);
