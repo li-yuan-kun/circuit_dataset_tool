@@ -1492,7 +1492,7 @@ function bindCircuitInteractions(opts: {
     const hitNodeId = engine.hitTestNode(p);
     if (hitNodeId) {
       const node = engine.getNodeById(hitNodeId);
-      engine.setSelection({ nodeId: hitNodeId });
+      engine.setSelection({ selectedNodeIds: [hitNodeId], selectedNetIds: [] });
       if (node) {
         draggingNodeId = hitNodeId;
         dragOffset = { x: p.x - node.pos.x, y: p.y - node.pos.y };
@@ -1503,7 +1503,7 @@ function bindCircuitInteractions(opts: {
 
     const hitNetId = engine.hitTestNet(p);
     if (hitNetId) {
-      engine.setSelection({ netId: hitNetId });
+      engine.setSelection({ selectedNodeIds: [], selectedNetIds: [hitNetId] });
       redrawAll();
       return;
     }
@@ -1609,8 +1609,9 @@ function bindCircuitInteractions(opts: {
     (ev) => {
       if (!canEdit()) return;
       const sel = engine.getSelection();
-      if (!sel?.nodeId) return;
-      const node = engine.getNodeById(sel.nodeId);
+      const firstSelectedNodeId = sel.selectedNodeIds[0];
+      if (!firstSelectedNodeId) return;
+      const node = engine.getNodeById(firstSelectedNodeId);
       if (!node) return;
 
       ev.preventDefault();

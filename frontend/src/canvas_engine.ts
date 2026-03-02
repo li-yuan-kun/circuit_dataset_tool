@@ -446,7 +446,7 @@ export class CanvasEngine {
 
   clear(): void {
     this.scene = this.makeEmptyScene();
-    this.sel = null;
+    this.sel = { selectedNodeIds: [], selectedNetIds: [] };
   }
 
   setResolution(resolution: Resolution): void {
@@ -563,7 +563,7 @@ export class CanvasEngine {
     const replacedOld = existingNetIds.length > 0;
     if (replacedOld) {
       this.scene.nets = this.scene.nets.filter((net) => !existingNetIds.includes(net.id));
-      if (this.sel?.netId && existingNetIds.includes(this.sel.netId)) this.sel = null;
+      this.sel.selectedNetIds = this.sel.selectedNetIds.filter((id) => !existingNetIds.includes(id));
     }
 
     const id = `e${this.netSeq++}`;
@@ -576,7 +576,7 @@ export class CanvasEngine {
 
   removeNet(netId: string): void {
     this.scene.nets = this.scene.nets.filter((e) => e.id !== netId);
-    if (this.sel?.netId === netId) this.sel = null;
+    this.sel.selectedNetIds = this.sel.selectedNetIds.filter((id) => id !== netId);
   }
 
   setSelection(sel: { nodeId?: string; netId?: string; selectedNodeIds?: string[] } | null): void {
@@ -872,14 +872,6 @@ export class CanvasEngine {
     return adjusted.slice(1, adjusted.length - 1);
   }
 
-  private isRouteValidForNet(path: Point[], net: Net): boolean {
-    if (!Array.isArray(path) || path.length < 2) return false;
-    if (this.pathIntersectsBBoxes(this.pathForObstacleCheck(path, net), this.netObstacles(net))) return false;
-    const internal = this.pathInternalForEndpointCheck(path, net);
-    if (internal.length >= 2 && this.pathIntersectsBBoxes(internal, this.netEndpointBoxes(net))) return false;
-    return true;
-  }
-
   private validateBackendPath(net: Net, path: Point[]): { ok: boolean; hitObstacle: boolean } {
     if (!Array.isArray(path) || path.length < 2) return { ok: false, hitObstacle: false };
     const checkedPath = this.pathForObstacleCheck(path, net);
@@ -1001,8 +993,8 @@ export class CanvasEngine {
     const hv = [{ ...p0 }, { ...p0Out }, { x: p1Out.x, y: p0Out.y }, { ...p1Out }, { ...p1 }];
     const vh = [{ ...p0 }, { ...p0Out }, { x: p0Out.x, y: p1Out.y }, { ...p1Out }, { ...p1 }];
 
-    const hvPenalty = this.isRouteValidForNet(hv, net) ? 0 : 1;
-    const vhPenalty = this.isRouteValidForNet(vh, net) ? 0 : 1;
+    const hvPenalty = this.isRouteValidForNet(net, hv) ? 0 : 1;
+    const vhPenalty = this.isRouteValidForNet(net, vh) ? 0 : 1;
     const base = hvPenalty <= vhPenalty ? hv : vh;
     const routed = this.reroutePolylineAvoidObstacles(base, net);
     const routedValid = this.isRouteValidForNet(net, routed);
@@ -1185,7 +1177,7 @@ export class CanvasEngine {
 
     // nets
     for (const e of this.scene.nets) {
-      const isSel = this.sel?.netId === e.id;
+      const isSel = this.sel.selectedNetIds.includes(e.id);
       let path = (e.path && e.path.length >= 2) ? e.path : this.computeDefaultNetPath(e);
       const routeValid = this.isRouteValidForNet(e, path);
       if (!routeValid) {
