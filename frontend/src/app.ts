@@ -1312,9 +1312,13 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
   const GROUND_TYPE = resolveType(["GND", "GROUND", "AGND"], "C");
   const RESISTOR_TYPE = resolveType(["R", "RES"], "R");
   const CAPACITOR_TYPE = resolveType(["C", "CAP"], "C");
+  const IO_TYPE = resolveType(["IO", "IN", "OUT", "PORT"], "R");
 
   const addChain = (types: string[], y: number): string[] => {
-    return types.map((type, idx) => engine.addNode(type, { x: 180 + idx * 180, y }));
+    const ids = types.map((type, idx) => engine.addNode(type, { x: 180 + idx * 180, y }));
+    if (types[0] === IO_TYPE) engine.rotateNode(ids[0], 0);
+    if (types[types.length - 1] === IO_TYPE) engine.rotateNode(ids[ids.length - 1], Math.PI);
+    return ids;
   };
 
   const connectByEnds = (nodeA: string, typeA: string, nodeB: string, typeB: string): void => {
@@ -1329,11 +1333,11 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
 
   bindOptionalClick("btn-preset-vrcgnd", () => {
     engine.clear();
-    const types = [SOURCE_TYPE, RESISTOR_TYPE, CAPACITOR_TYPE, GROUND_TYPE];
+    const types = [IO_TYPE, SOURCE_TYPE, RESISTOR_TYPE, CAPACITOR_TYPE, GROUND_TYPE, IO_TYPE];
     const ids = addChain(types, 360);
     for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
     afterApply();
-    log(`已加载预设：${types.join("-")}（4 器件）`);
+    log(`已加载预设：${types.join("-")}（6 器件）`);
   }, log);
 
   bindOptionalClick("btn-preset-rc-parallel", () => {
@@ -1342,21 +1346,26 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
     const resistor = engine.addNode(RESISTOR_TYPE, { x: 420, y: 300 });
     const capacitor = engine.addNode(CAPACITOR_TYPE, { x: 420, y: 460 });
     const ground = engine.addNode(GROUND_TYPE, { x: 680, y: 380 });
+    const input = engine.addNode(IO_TYPE, { x: 80, y: 380 });
+    const output = engine.addNode(IO_TYPE, { x: 820, y: 380 });
+    engine.rotateNode(output, Math.PI);
+    connectByEnds(input, IO_TYPE, source, SOURCE_TYPE);
     connectByEnds(source, SOURCE_TYPE, resistor, RESISTOR_TYPE);
     connectByEnds(source, SOURCE_TYPE, capacitor, CAPACITOR_TYPE);
     connectByEnds(resistor, RESISTOR_TYPE, ground, GROUND_TYPE);
     connectByEnds(capacitor, CAPACITOR_TYPE, ground, GROUND_TYPE);
+    connectByEnds(ground, GROUND_TYPE, output, IO_TYPE);
     afterApply();
-    log(`已加载预设：${RESISTOR_TYPE}∥${CAPACITOR_TYPE} + ${GROUND_TYPE}（4 器件）`);
+    log(`已加载预设：${IO_TYPE}-${RESISTOR_TYPE}∥${CAPACITOR_TYPE}-${GROUND_TYPE}-${IO_TYPE}（6 器件）`);
   }, log);
 
   bindOptionalClick("btn-preset-rcladder", () => {
     engine.clear();
-    const types = [SOURCE_TYPE, RESISTOR_TYPE, CAPACITOR_TYPE, RESISTOR_TYPE, GROUND_TYPE];
+    const types = [IO_TYPE, SOURCE_TYPE, RESISTOR_TYPE, CAPACITOR_TYPE, RESISTOR_TYPE, GROUND_TYPE, IO_TYPE];
     const ids = addChain(types, 380);
     for (let i = 0; i < ids.length - 1; i++) connectByEnds(ids[i], types[i], ids[i + 1], types[i + 1]);
     afterApply();
-    log(`已加载预设：${RESISTOR_TYPE}-${CAPACITOR_TYPE}-${RESISTOR_TYPE} 梯形（5 器件）`);
+    log(`已加载预设：${IO_TYPE}-${RESISTOR_TYPE}-${CAPACITOR_TYPE}-${RESISTOR_TYPE}-${GROUND_TYPE}-${IO_TYPE} 梯形（7 器件）`);
   }, log);
 }
 
