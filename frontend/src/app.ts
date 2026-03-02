@@ -1599,9 +1599,45 @@ function bindCircuitInteractions(opts: {
       }
       return;
     }
-    if (ev.key !== "Delete" && ev.key !== "Backspace") return;
+
+    if (ev.key === "Delete" || ev.key === "Backspace") {
+      ev.preventDefault();
+      deleteSelected();
+      return;
+    }
+
+    const sel = engine.getSelection();
+    const selectedNodeIds = sel?.selectedNodeIds ?? [];
+    if (!selectedNodeIds.length) return;
+
+    const step = ev.shiftKey ? 10 : 2;
+    let dx = 0;
+    let dy = 0;
+    switch (ev.key) {
+      case "ArrowLeft":
+        dx = -step;
+        break;
+      case "ArrowRight":
+        dx = step;
+        break;
+      case "ArrowUp":
+        dy = -step;
+        break;
+      case "ArrowDown":
+        dy = step;
+        break;
+      default:
+        return;
+    }
+
     ev.preventDefault();
-    deleteSelected();
+    for (const nodeId of selectedNodeIds) {
+      const node = engine.getNodeById(nodeId);
+      if (!node) continue;
+      engine.moveNode(node.id, { x: node.pos.x + dx, y: node.pos.y + dy });
+    }
+    onChange();
+    redrawAll();
   });
 
   uiCanvas.addEventListener(
