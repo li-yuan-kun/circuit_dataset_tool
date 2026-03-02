@@ -87,6 +87,27 @@
         "w": 93.34
       }
     },
+    "IO": {
+      "asset": {
+        "path": "components_svg/IO.svg",
+        "type": "svg"
+      },
+      "category": "connector",
+      "display_name": "I/O Port",
+      "footprint": {
+        "path": "IO.png"
+      },
+      "pins": {
+        "p0": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      "size": {
+        "h": 26.66,
+        "w": 26.66
+      }
+    },
     "NAND": {
       "asset": {
         "path": "components_svg/NAND.svg",
