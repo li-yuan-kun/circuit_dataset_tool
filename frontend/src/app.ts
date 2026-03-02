@@ -1417,18 +1417,14 @@ function bindCircuitInteractions(opts: {
 
   const deleteSelected = () => {
     const sel = engine.getSelection();
-    if (sel?.nodeId) {
-      engine.removeNode(sel.nodeId);
+    const netIds = [...sel.selectedNetIds];
+    const nodeIds = [...sel.selectedNodeIds];
+    for (const netId of netIds) engine.removeNet(netId);
+    for (const nodeId of nodeIds) engine.removeNode(nodeId);
+    if (nodeIds.length || netIds.length) {
       onChange();
       redrawAll();
-      log(`已删除器件：${sel.nodeId}`);
-      return;
-    }
-    if (sel?.netId) {
-      engine.removeNet(sel.netId);
-      onChange();
-      redrawAll();
-      log(`已删除连线：${sel.netId}`);
+      log(`已删除 ${nodeIds.length} 个器件 / ${netIds.length} 条连线`);
       return;
     }
     log("未选中可删除的器件或连线");
@@ -1456,7 +1452,7 @@ function bindCircuitInteractions(opts: {
     const hitNodeId = engine.hitTestNode(p);
     if (hitNodeId) {
       const node = engine.getNodeById(hitNodeId);
-      engine.setSelection({ nodeId: hitNodeId });
+      engine.setSelection({ selectedNodeIds: [hitNodeId], selectedNetIds: [] });
       if (node) {
         draggingNodeId = hitNodeId;
         dragOffset = { x: p.x - node.pos.x, y: p.y - node.pos.y };
@@ -1467,7 +1463,7 @@ function bindCircuitInteractions(opts: {
 
     const hitNetId = engine.hitTestNet(p);
     if (hitNetId) {
-      engine.setSelection({ netId: hitNetId });
+      engine.setSelection({ selectedNodeIds: [], selectedNetIds: [hitNetId] });
       redrawAll();
       return;
     }
@@ -1526,8 +1522,9 @@ function bindCircuitInteractions(opts: {
     (ev) => {
       if (!canEdit()) return;
       const sel = engine.getSelection();
-      if (!sel?.nodeId) return;
-      const node = engine.getNodeById(sel.nodeId);
+      const firstSelectedNodeId = sel.selectedNodeIds[0];
+      if (!firstSelectedNodeId) return;
+      const node = engine.getNodeById(firstSelectedNodeId);
       if (!node) return;
 
       ev.preventDefault();
