@@ -1315,7 +1315,10 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
   const IO_TYPE = resolveType(["IO", "IN", "OUT", "PORT"], "R");
 
   const addChain = (types: string[], y: number): string[] => {
-    return types.map((type, idx) => engine.addNode(type, { x: 180 + idx * 180, y }));
+    const ids = types.map((type, idx) => engine.addNode(type, { x: 180 + idx * 180, y }));
+    if (types[0] === IO_TYPE) engine.rotateNode(ids[0], 0);
+    if (types[types.length - 1] === IO_TYPE) engine.rotateNode(ids[ids.length - 1], Math.PI);
+    return ids;
   };
 
   const connectByEnds = (nodeA: string, typeA: string, nodeB: string, typeB: string): void => {
@@ -1345,6 +1348,7 @@ function bindPresets(engine: CanvasEngine, vocab: any, afterApply: () => void, l
     const ground = engine.addNode(GROUND_TYPE, { x: 680, y: 380 });
     const input = engine.addNode(IO_TYPE, { x: 80, y: 380 });
     const output = engine.addNode(IO_TYPE, { x: 820, y: 380 });
+    engine.rotateNode(output, Math.PI);
     connectByEnds(input, IO_TYPE, source, SOURCE_TYPE);
     connectByEnds(source, SOURCE_TYPE, resistor, RESISTOR_TYPE);
     connectByEnds(source, SOURCE_TYPE, capacitor, CAPACITOR_TYPE);

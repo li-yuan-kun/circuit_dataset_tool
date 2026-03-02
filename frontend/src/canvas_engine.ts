@@ -302,7 +302,7 @@ function drawSourceSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): 
 }
 
 function drawIoPortSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const r = Math.max(6, Math.min(w, h) * 0.18);
+  const r = Math.max(8, Math.min(w, h) * 0.28);
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
