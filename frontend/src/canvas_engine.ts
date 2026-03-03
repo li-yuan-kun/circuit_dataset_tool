@@ -9,6 +9,13 @@ export type NodeRenderOptions = {
   showTypeLabelOnSymbol?: boolean;
 };
 
+type SelectionState = {
+  nodeId?: string;
+  netId?: string;
+  selectedNodeIds: string[];
+  selectedNetIds: string[];
+};
+
 type CustomSymbol = { img: HTMLImageElement };
 
 function deepCopy<T>(obj: T): T {
@@ -380,7 +387,7 @@ export class CanvasEngine {
   private readonly vocab: any;
 
   private scene: Scene;
-  private sel: { nodeId?: string; netId?: string; selectedNodeIds?: string[] } | null = null;
+  private sel: SelectionState | null = null;
 
   private nodeSeq = 1;
   private netSeq = 1;
@@ -460,8 +467,8 @@ export class CanvasEngine {
 
   setNodeRenderOptions(opts: NodeRenderOptions): void {
     if (opts.mode === "symbol" || opts.mode === "box") this.nodeRenderMode = opts.mode;
-    if (Number.isFinite(opts.strokeScale)) this.nodeStrokeScale = Math.max(0.5, Math.min(3, Number(opts.strokeScale)));
-    if (Number.isFinite(opts.netStrokeScale)) this.netStrokeScale = Math.max(0.5, Math.min(4, Number(opts.netStrokeScale)));
+    if (Number.isFinite(opts.strokeScale)) this.nodeStrokeScale = Math.max(0.2, Math.min(6, Number(opts.strokeScale)));
+    if (Number.isFinite(opts.netStrokeScale)) this.netStrokeScale = Math.max(0.2, Math.min(8, Number(opts.netStrokeScale)));
     if (typeof opts.showTypeLabelOnSymbol === "boolean") this.showTypeLabelOnSymbol = opts.showTypeLabelOnSymbol;
   }
 
@@ -563,7 +570,7 @@ export class CanvasEngine {
     const replacedOld = existingNetIds.length > 0;
     if (replacedOld) {
       this.scene.nets = this.scene.nets.filter((net) => !existingNetIds.includes(net.id));
-      this.sel.selectedNetIds = this.sel.selectedNetIds.filter((id) => !existingNetIds.includes(id));
+      if (this.sel) this.sel.selectedNetIds = this.sel.selectedNetIds.filter((id) => !existingNetIds.includes(id));
     }
 
     const id = `e${this.netSeq++}`;
@@ -576,10 +583,10 @@ export class CanvasEngine {
 
   removeNet(netId: string): void {
     this.scene.nets = this.scene.nets.filter((e) => e.id !== netId);
-    this.sel.selectedNetIds = this.sel.selectedNetIds.filter((id) => id !== netId);
+    if (this.sel) this.sel.selectedNetIds = this.sel.selectedNetIds.filter((id) => id !== netId);
   }
 
-  setSelection(sel: { nodeId?: string; netId?: string; selectedNodeIds?: string[] } | null): void {
+  setSelection(sel: { nodeId?: string; netId?: string; selectedNodeIds?: string[]; selectedNetIds?: string[] } | null): void {
     if (!sel) {
       this.sel = null;
       return;
@@ -588,19 +595,32 @@ export class CanvasEngine {
       ? Array.from(new Set(sel.selectedNodeIds.filter(Boolean)))
       : [];
     const nodeId = sel.nodeId || selectedNodeIds[0];
+    const selectedNetIds = Array.isArray(sel.selectedNetIds)
+      ? Array.from(new Set(sel.selectedNetIds.filter(Boolean)))
+      : [];
+    const netId = sel.netId || selectedNetIds[0];
+    if (netId && !selectedNetIds.includes(netId)) selectedNetIds.unshift(netId);
     if (nodeId && !selectedNodeIds.includes(nodeId)) selectedNodeIds.unshift(nodeId);
     this.sel = {
       ...sel,
       nodeId,
+      netId,
       selectedNodeIds,
+      selectedNetIds,
     };
   }
   getNodeById(nodeId: string): Node | null {
     return this.scene.nodes.find((x) => x.id === nodeId) ?? null;
   }
 
-  getSelection(): { nodeId?: string; netId?: string; selectedNodeIds?: string[] } | null {
-    return this.sel ? { ...this.sel, selectedNodeIds: [...(this.sel.selectedNodeIds ?? [])] } : null;
+  getSelection(): { nodeId?: string; netId?: string; selectedNodeIds?: string[]; selectedNetIds?: string[] } | null {
+    return this.sel
+      ? {
+        ...this.sel,
+        selectedNodeIds: [...this.sel.selectedNodeIds],
+        selectedNetIds: [...this.sel.selectedNetIds],
+      }
+      : null;
   }
 
   getNodes(): Node[] {
@@ -1177,7 +1197,7 @@ export class CanvasEngine {
 
     // nets
     for (const e of this.scene.nets) {
-      const isSel = this.sel.selectedNetIds.includes(e.id);
+      const isSel = this.sel?.selectedNetIds?.includes(e.id) ?? false;
       let path = (e.path && e.path.length >= 2) ? e.path : this.computeDefaultNetPath(e);
       const routeValid = this.isRouteValidForNet(e, path);
       if (!routeValid) {

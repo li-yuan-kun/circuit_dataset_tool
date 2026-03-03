@@ -303,11 +303,11 @@ export async function bootstrapApp(): Promise<void> {
       const mode = localStorage.getItem("cdt.nodeRenderMode");
       if (mode === "symbol" || mode === "box") modeEl.value = mode;
       const stroke = Number(localStorage.getItem("cdt.nodeStrokeScale"));
-      if (Number.isFinite(stroke)) strokeEl.value = String(Math.max(0.5, Math.min(3, stroke)));
+      if (Number.isFinite(stroke)) strokeEl.value = String(Math.max(0.2, Math.min(6, stroke)));
       const showType = localStorage.getItem("cdt.nodeShowType");
       if (showType === "true" || showType === "false") showTypeEl.checked = showType === "true";
       const netStroke = Number(localStorage.getItem("cdt.netStrokeScale"));
-      if (Number.isFinite(netStroke)) netStrokeEl.value = String(Math.max(0.5, Math.min(4, netStroke)));
+      if (Number.isFinite(netStroke)) netStrokeEl.value = String(Math.max(0.2, Math.min(8, netStroke)));
     } catch {
       // ignore
     }
