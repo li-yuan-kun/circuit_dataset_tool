@@ -310,6 +310,7 @@ function drawSourceSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): 
 
 function drawIoPortSymbol(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const r = Math.max(8, Math.min(w, h) * 0.28);
+  ctx.fillStyle = "#ff0000";
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
@@ -1293,8 +1294,9 @@ export class CanvasEngine {
 
       // pins
       const pins = iterPinsFromVocab(this.vocab, n.type);
-      const compactPinTypes = new Set(["IO", "IN", "OUT"]);
-      if (pins.length && !compactPinTypes.has(String(n.type).toUpperCase())) {
+      const nodeType = String(n.type).toUpperCase();
+      const isIoType = nodeType === "IO" || nodeType === "IN" || nodeType === "OUT";
+      if (pins.length && !isIoType) {
         const pinOuter = Math.max(0.8, Math.min(3.2, Math.min(bw, bh) * 0.14));
         const pinInner = Math.max(0.5, pinOuter * 0.68);
         ctx.fillStyle = "#ff0000";
