@@ -1293,7 +1293,8 @@ export class CanvasEngine {
 
       // pins
       const pins = iterPinsFromVocab(this.vocab, n.type);
-      if (pins.length) {
+      const compactPinTypes = new Set(["IO", "IN", "OUT"]);
+      if (pins.length && !compactPinTypes.has(String(n.type).toUpperCase())) {
         const pinOuter = Math.max(0.8, Math.min(3.2, Math.min(bw, bh) * 0.14));
         const pinInner = Math.max(0.5, pinOuter * 0.68);
         ctx.fillStyle = "#ff0000";
