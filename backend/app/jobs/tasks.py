@@ -242,15 +242,33 @@ def _build_manifest_record(*, sample_id: str, saved_paths: Dict[str, Any], scene
 def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> bytes:
     from PIL import Image, ImageDraw  # type: ignore
 
-    from ..core_logic.rasterize import render_footprint_on_canvas  # type: ignore
+    from ..core_logic.rasterize import node_bbox, render_footprint_on_canvas  # type: ignore
 
     w, h = _scene_resolution(scene, settings)
     canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    meta = (scene or {}).get("meta") if isinstance(scene, dict) else {}
+    params = (meta or {}).get("params") if isinstance(meta, dict) else {}
+    node_render_mode = str((params or {}).get("node_render_mode") or "symbol").strip().lower()
+    node_stroke_scale = float((params or {}).get("node_stroke_scale") or 1.0)
+    net_stroke_scale = float((params or {}).get("net_stroke_scale") or 1.0)
+    node_stroke_px = max(1, int(round(max(0.2, node_stroke_scale) * 2)))
+    net_stroke_px = max(1, int(round(max(0.2, net_stroke_scale) * 3)))
+
+    img = Image.fromarray(canvas, mode="RGB")
+    draw = ImageDraw.Draw(img)
+
     for node in (scene.get("nodes") or []):
         if not isinstance(node, dict):
             continue
         comp_type = str(node.get("type") or "")
         if not comp_type:
+            continue
+        if node_render_mode == "box":
+            try:
+                x0, y0, x1, y1 = node_bbox(node=node, vocab=footprint_db)
+            except Exception:
+                continue
+            draw.rectangle((x0, y0, x1, y1), outline=(255, 0, 0), width=node_stroke_px)
             continue
         try:
             fp = render_footprint_on_canvas(node=node, footprint_db=footprint_db, resolution=(w, h))
@@ -258,9 +276,11 @@ def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> 
             continue
         canvas[np.asarray(fp, dtype=np.uint8) > 0] = (255, 0, 0)
 
+    if node_render_mode != "box":
+        img = Image.fromarray(canvas, mode="RGB")
+        draw = ImageDraw.Draw(img)
+
     # Draw net polylines in red so saved batch images keep visible wiring as colored output.
-    img = Image.fromarray(canvas, mode="RGB")
-    draw = ImageDraw.Draw(img)
     for net in (scene.get("nets") or []):
         if not isinstance(net, dict):
             continue
@@ -278,12 +298,12 @@ def _rasterize_scene_png(scene: Dict[str, Any], footprint_db: Any, settings) -> 
                 continue
             pts.append((x, y))
         if len(pts) >= 2:
-            draw.line(pts, fill=(255, 0, 0), width=3)
+            draw.line(pts, fill=(255, 0, 0), width=net_stroke_px)
 
     import io
 
     out = io.BytesIO()
-    Image.fromarray(canvas, mode="RGB").save(out, format="PNG")
+    img.save(out, format="PNG")
     return out.getvalue()
 
 
