@@ -264,6 +264,14 @@ export async function bootstrapApp(): Promise<void> {
 
   const syncScene = (): Scene => {
     const scene = engine.serializeScene();
+    const mode = byId<HTMLSelectElement>("node-render-mode").value as NodeRenderMode;
+    const nodeStrokeScale = toNum(byId<HTMLInputElement>("node-stroke-scale").value, 1);
+    const netStrokeScale = toNum(byId<HTMLInputElement>("net-stroke-scale").value, 1);
+    if (!scene.meta) scene.meta = {};
+    if (!scene.meta.params || typeof scene.meta.params !== "object") scene.meta.params = {};
+    scene.meta.params.node_render_mode = mode;
+    scene.meta.params.node_stroke_scale = nodeStrokeScale;
+    scene.meta.params.net_stroke_scale = netStrokeScale;
     state.scene = scene;
     return scene;
   };
@@ -1003,6 +1011,12 @@ export async function bootstrapApp(): Promise<void> {
       if (!ctx) throw new Error("无法创建批处理离屏画布");
       const tempEngine = new CanvasEngine({ resolution, vocab });
       tempEngine.loadScene(scene);
+      tempEngine.setNodeRenderOptions({
+        mode: byId<HTMLSelectElement>("node-render-mode").value as NodeRenderMode,
+        strokeScale: toNum(byId<HTMLInputElement>("node-stroke-scale").value, 1),
+        netStrokeScale: toNum(byId<HTMLInputElement>("net-stroke-scale").value, 1),
+        showTypeLabelOnSymbol: byId<HTMLInputElement>("node-show-type").checked,
+      });
       tempEngine.draw(ctx);
       return await exportCanvasPNG(canvas);
     };
